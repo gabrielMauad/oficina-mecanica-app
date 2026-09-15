@@ -1,6 +1,6 @@
 {
   "name": "Oficina Mecânica — Observabilidade (RFC-004)",
-  "description": "ANTES DE IMPORTAR: substitua o valor 0 em todo campo \"accountId\" pelo Account ID da conta New Relic (visível em https://one.newrelic.com em Account settings, ou no menu do usuário). Widgets com \"(TODO: confirmar no primeiro dado)\" no título usam nomes de evento/atributo que não puderam ser confirmados sem dados reais chegando - ver docs/observabilidade/ e a seção 6.3 de docs/arquitetura/rfcs/004-ferramenta-de-observabilidade.md. Formato: schema de importação de dashboard da New Relic (mesma forma usada por NerdGraph DashboardInput / export de dashboard), ver https://docs.newrelic.com/docs/query-your-data/explore-query-data/dashboards/dashboards-charts-import-export-data/.",
+  "description": "ANTES DE IMPORTAR: substitua o valor 0 em todo campo \"accountId\" pelo Account ID da conta New Relic (visível em https://one.newrelic.com em Account settings, ou no menu do usuário). Todas as consultas abaixo foram validadas com tráfego real de produção - ver docs/observabilidade/validacao.md para o procedimento e os resultados esperado x medido. O widget de uptime passa a ter dado assim que o monitor sintético `oficina-mecanica-healthz` (docs/observabilidade/uptime.md) for criado. Formato: schema de importação de dashboard da New Relic (mesma forma usada por NerdGraph DashboardInput / export de dashboard), ver https://docs.newrelic.com/docs/query-your-data/explore-query-data/dashboards/dashboards-charts-import-export-data/.",
   "permissions": "PUBLIC_READ_WRITE",
   "pages": [
     {
@@ -46,33 +46,33 @@
           }
         },
         {
-          "title": "Latência das APIs — p95 e média (TODO: confirmar no primeiro dado)",
+          "title": "Latência das APIs — p95 e média (exclui /healthz, respondido pela NLB/kubelet a cada poucos segundos)",
           "layout": { "column": 7, "row": 4, "width": 6, "height": 3 },
           "visualization": { "id": "viz.line" },
           "rawConfiguration": {
             "nrqlQueries": [
               {
                 "accountId": 0,
-                "query": "SELECT percentile(duration.ms, 95), average(duration.ms) FROM Span WHERE service.name = 'oficina-mecanica-api' AND kind = 'server' FACET name TIMESERIES AUTO SINCE 1 day ago"
+                "query": "SELECT percentile(duration.ms, 95), average(duration.ms) FROM Span WHERE service.name = 'oficina-mecanica-api' AND span.kind = 'server' AND url.path NOT LIKE '/healthz%' FACET http.route TIMESERIES AUTO SINCE 1 day ago"
               }
             ]
           }
         },
         {
-          "title": "Taxa de erro HTTP (5xx) (TODO: confirmar no primeiro dado)",
+          "title": "Taxa de erro HTTP (5xx) (exclui /healthz, respondido pela NLB/kubelet a cada poucos segundos)",
           "layout": { "column": 1, "row": 7, "width": 6, "height": 3 },
           "visualization": { "id": "viz.line" },
           "rawConfiguration": {
             "nrqlQueries": [
               {
                 "accountId": 0,
-                "query": "SELECT percentage(count(*), WHERE numeric(http.status_code) >= 500) FROM Span WHERE service.name = 'oficina-mecanica-api' AND kind = 'server' FACET name TIMESERIES AUTO SINCE 1 day ago"
+                "query": "SELECT percentage(count(*), WHERE http.response.status_code >= 500) FROM Span WHERE service.name = 'oficina-mecanica-api' AND span.kind = 'server' AND url.path NOT LIKE '/healthz%' FACET http.route TIMESERIES AUTO SINCE 1 day ago"
               }
             ]
           }
         },
         {
-          "title": "CPU e memória do cluster, por nó (TODO: confirmar no primeiro dado)",
+          "title": "CPU e memória do cluster, por nó",
           "layout": { "column": 7, "row": 7, "width": 6, "height": 3 },
           "visualization": { "id": "viz.line" },
           "rawConfiguration": {
@@ -85,20 +85,20 @@
           }
         },
         {
-          "title": "CPU e memória do cluster, por pod (TODO: confirmar no primeiro dado)",
+          "title": "CPU e memória do cluster, por pod",
           "layout": { "column": 1, "row": 10, "width": 6, "height": 3 },
           "visualization": { "id": "viz.line" },
           "rawConfiguration": {
             "nrqlQueries": [
               {
                 "accountId": 0,
-                "query": "SELECT average(cpuUsedCores), average(memoryWorkingSetBytes) FROM K8sPodSample WHERE clusterName = 'oficina-mecanica' AND namespaceName = 'oficina-mecanica' FACET podName TIMESERIES AUTO SINCE 1 day ago"
+                "query": "SELECT average(cpuUsedCores), average(memoryWorkingSetBytes) FROM K8sContainerSample WHERE clusterName = 'oficina-mecanica' AND namespaceName = 'oficina-mecanica' FACET podName TIMESERIES AUTO SINCE 1 day ago"
               }
             ]
           }
         },
         {
-          "title": "Uptime / healthcheck (TODO: confirmar no primeiro dado)",
+          "title": "Uptime / healthcheck",
           "layout": { "column": 7, "row": 10, "width": 6, "height": 3 },
           "visualization": { "id": "viz.billboard" },
           "rawConfiguration": {

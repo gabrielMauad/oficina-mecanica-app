@@ -431,7 +431,8 @@ sem Terraform) — o roteiro de configuração manual está em
 [`docs/observabilidade/`](docs/observabilidade/):
 [`dashboard-oficina-mecanica.json`](docs/observabilidade/dashboard-oficina-mecanica.json)
 (importável), [`alertas.md`](docs/observabilidade/alertas.md) e
-[`uptime.md`](docs/observabilidade/uptime.md).
+[`uptime.md`](docs/observabilidade/uptime.md). As consultas NRQL foram validadas com dados reais
+de produção — ver [`validacao.md`](docs/observabilidade/validacao.md).
 
 ---
 
