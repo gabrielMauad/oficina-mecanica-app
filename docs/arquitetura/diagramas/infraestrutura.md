@@ -89,7 +89,7 @@ flowchart TB
     api -.->|"OTLP http/protobuf :4318: traces + metricas + logs"| apm
     nri -.->|"metricas de CPU/memoria de nos e pods"| apm
     apm -.->|"Synthetic (Ping): GET /healthz/ready"| gw
-    apm -.->|"alerta de dashboard/monitor"| equipe
+    apm -.->|"alertas (workflow → e-mail)"| equipe
 
     classDef existente fill:#1168bd,stroke:#0b4884,color:#fff
     class ator fill:#08427b,stroke:#052e56,color:#fff
@@ -106,10 +106,10 @@ rota no API Gateway em `oficina-mecanica-lambda-auth`; a imagem, os manifestos d
 implementado no [RFC-004](../rfcs/004-ferramenta-de-observabilidade.md): a aplicação exporta
 traces, métricas e logs por OTLP (`http/protobuf`, `otlp.nr-data.net:4318`); o `nri-bundle`
 (Helm, namespace `newrelic`) publica CPU/memória de nós e pods; um monitor sintético (Ping,
-`oficina-mecanica-healthz`) verifica `GET /healthz/ready` através do próprio API Gateway; e
-dashboards/alertas notificam a equipe por e-mail (ver `docs/observabilidade/`). A **Function
-Serverless não é instrumentada**: roda em subnet sem NAT Gateway, sem alcance à internet para
-exportar OTLP (ADR-004, RFC-004).
+`oficina-mecanica-healthz`) verifica `GET /healthz/ready` através do próprio API Gateway; e as
+condições de alerta (incluindo a falha desse monitor sintético) disparam um workflow que notifica
+a equipe por e-mail (ver `docs/observabilidade/`). A **Function Serverless não é instrumentada**:
+roda em subnet sem NAT Gateway, sem alcance à internet para exportar OTLP (ADR-004, RFC-004).
 
 **Topologia de repositórios** (ver
 [ADR-005](../adrs/005-quatro-repositorios-e-estrategia-de-branches.md)): o Terraform deste

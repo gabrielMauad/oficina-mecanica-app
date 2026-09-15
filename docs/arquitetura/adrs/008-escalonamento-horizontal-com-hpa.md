@@ -6,9 +6,11 @@
 
 ## Contexto
 
-A Fase 3 exige um "cluster Kubernetes gerenciado com escalabilidade" (ver
-[`diagramas/infraestrutura.md`](../diagramas/infraestrutura.md)) — a demonstração em vídeo precisa
-mostrar a aplicação escalando sob carga, não só rodando em réplica fixa.
+A Fase 3 exige um "Cluster Kubernetes com escalabilidade (gerenciado, ex.: EKS) — não mais kind"
+(`docs/planos/fase-3/00-analise-da-spec.md`, item 9; ver também
+[`diagramas/infraestrutura.md`](../diagramas/infraestrutura.md)). O mesmo documento já previa que
+essa decisão ganhasse um ADR dedicado (item 17: "ADRs para decisões arquiteturais permanentes
+(padrão de comunicação, uso de HPA, etc.)") — esta ADR fecha essa lacuna.
 
 Duas restrições da conta **AWS Academy Learner Lab** moldam o espaço de escolha:
 
@@ -47,8 +49,8 @@ escala em resposta à carga.
 ## Alternativas consideradas
 
 **Réplicas fixas / escalonamento manual.** Mais simples de configurar, mas não atende ao
-requisito explícito de escalabilidade da fase — não haveria nada para demonstrar em vídeo além de
-um número fixo de pods. Descartada.
+requisito explícito de escalabilidade da fase (`docs/planos/fase-3/00-analise-da-spec.md`, item
+9: "Cluster Kubernetes com escalabilidade... não mais kind"). Descartada.
 
 **Cluster Autoscaler ou Karpenter (escalar nós, não só pods).** Ambos precisam de uma role/policy
 IAM dedicada para chamar as APIs de EC2/Auto Scaling Groups em nome do cluster (tipicamente via
@@ -61,17 +63,17 @@ escalar a aplicação sob carga, não a infraestrutura subjacente — o HPA de p
 Descartada.
 
 **VPA (Vertical Pod Autoscaler).** Ajusta `requests`/`limits` do próprio pod em vez do número de
-réplicas, o que exige recriar o pod a cada ajuste — não serve para absorver um pico de tráfego em
-tempo real como o HPA horizontal, e não há uso nem menção a VPA em nenhum manifesto deste
-repositório. Descartada por não atender ao cenário de demonstração (pico de requisições).
+réplicas, o que exige recriar o pod a cada ajuste — não resolve o problema de atender mais tráfego
+simultâneo horizontalmente como o HPA, e não há uso nem menção a VPA em nenhum manifesto deste
+repositório. Descartada por não ser a ferramenta certa para escalabilidade horizontal.
 
 **Escalonamento por métrica customizada (ex.: fila, latência via adaptador externo).** O chart
 `nri-bundle` da New Relic inclui um adaptador de métricas para HPA
 (`newrelic-k8s-metrics-adapter`), mas ele é **explicitamente desligado** em
 `k8s/observabilidade/newrelic-values.yaml`, com a justificativa registrada no próprio arquivo: "o
 HPA deste projeto usa métrica nativa de CPU (metrics-server, `k8s/app/22-api-hpa.yaml`), não
-precisa de métrica externa". CPU via `metrics-server` já é suficiente e mais simples para o
-cenário de demonstração exigido. Descartada.
+precisa de métrica externa". CPU via `metrics-server` já é suficiente e mais simples, e é
+exatamente a métrica que o HPA deste projeto usa. Descartada.
 
 ## Consequências
 
@@ -87,14 +89,24 @@ cenário de demonstração exigido. Descartada.
 **Negativas e mitigações**
 - **O `maxReplicas: 5` do HPA não é livre — está limitado pela capacidade de pods do node group
   fixo.** `t3.small` suporta 11 pods por nó (limite de ENI/IP da instância, não CPU); com 2 nós
-  são ~22 slots, dos quais ~6 já são consumidos por pods de sistema (kube-proxy, coredns,
-  metrics-server, aws-node, mais o `nri-bundle` do New Relic), sobrando espaço suficiente para as
-  5 réplicas da aplicação (ver README de `oficina-mecanica-infra-k8s`, "Decisões de desenho" e
-  `k8s/observabilidade/newrelic-values.yaml`, conta de capacidade). Como não há Cluster
-  Autoscaler/Karpenter (alternativa descartada acima), esse teto é fixo: se o HPA precisasse
-  ultrapassar `maxReplicas: 5`, ou se a capacidade de pods do node group fosse o fator limitante
-  antes disso, o próximo passo seria aumentar `node_group_max_size` ou o tipo de instância — uma
-  mudança em `oficina-mecanica-infra-k8s`, não neste repositório.
+  são ~22 slots. Itemizando os pods de sistema (cluster inteiro, não por nó): `aws-node` e
+  `kube-proxy` são DaemonSets (1 pod por nó cada, 2+2 = 4 pods); `coredns` e o add-on gerenciado
+  `metrics-server` rodam com 2 réplicas cada (2+2 = 4 pods) — total de **~8 pods de sistema do
+  próprio EKS**, conforme a conta de capacidade em
+  `k8s/observabilidade/newrelic-values.yaml`. Somam-se os pods do `nri-bundle` da New Relic
+  (mesmo arquivo, componentes habilitados): o agente de infraestrutura `kubelet` é DaemonSet (1
+  pod por nó, 2 pods) e os coletores `ksm` e `kube-state-metrics` são Deployments de 1 réplica
+  cada (2 pods) — mais **4 pods de observabilidade**. Total: **~12 pods de sistema**, deixando
+  aproximadamente **10 dos 22 slots** livres — ainda suficiente para as 5 réplicas da aplicação,
+  mas mais apertado do que os "~16 livres" que o README de `oficina-mecanica-infra-k8s`
+  ("Decisões de desenho") estimava antes do `nri-bundle` ser adicionado (aquela conta não incluía
+  os pods de observabilidade). A distribuição exata entre os 2 nós depende do scheduler; os
+  DaemonSets (`aws-node`, `kube-proxy`, `kubelet` do New Relic) garantem 3 pods fixos por nó, os
+  demais podem concentrar em um nó específico. Como não há Cluster Autoscaler/Karpenter
+  (alternativa descartada acima), esse teto é fixo: se o HPA precisasse ultrapassar
+  `maxReplicas: 5`, ou se a capacidade de pods do node group fosse o fator limitante antes disso,
+  o próximo passo seria aumentar `node_group_max_size` ou o tipo de instância — uma mudança em
+  `oficina-mecanica-infra-k8s`, não neste repositório.
 - **O HPA baseado em CPU depende dos `resources.requests` do Deployment.** Sem
   `resources.requests.cpu: "100m"` (`k8s/app/20-api-deployment.yaml`), o `averageUtilization` não
   teria base de cálculo. Documentado aqui para que essa dependência não seja removida
