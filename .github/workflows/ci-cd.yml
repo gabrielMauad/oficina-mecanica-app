@@ -145,38 +145,6 @@ jobs:
             --from-literal=OTEL_EXPORTER_OTLP_HEADERS="$OTLP_HEADERS" \
             --dry-run=client -o yaml | kubectl apply -f -
 
-      # RFC-004, secao 6.1: metricas de CPU/memoria de node e pod nao vem do OTLP da aplicacao -
-      # exigem o Kubernetes integration da New Relic, instalado ANTES dos manifestos da aplicacao
-      # para que o agente ja esteja coletando quando o Deployment/HPA sobem. helm upgrade --install
-      # e idempotente (seguro rodar em todo deploy). Values versionados em
-      # k8s/observabilidade/newrelic-values.yaml documentam a conta de capacidade e por que cada
-      # componente extra do bundle esta desligado.
-      - name: Instalar Helm
-        uses: azure/setup-helm@v4
-        with:
-          version: v3.16.3
-
-      - name: Criar/atualizar Secret da license key (namespace newrelic)
-        env:
-          NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
-        run: |
-          echo "::add-mask::$NEW_RELIC_LICENSE_KEY"
-          kubectl create namespace newrelic --dry-run=client -o yaml | kubectl apply -f -
-          kubectl create secret generic newrelic-license-key \
-            --namespace newrelic \
-            --from-literal=licenseKey="$NEW_RELIC_LICENSE_KEY" \
-            --dry-run=client -o yaml | kubectl apply -f -
-
-      - name: Instalar/atualizar nri-bundle (New Relic Kubernetes integration)
-        run: |
-          helm repo add newrelic https://helm-charts.newrelic.com
-          helm repo update
-          helm upgrade --install newrelic-bundle newrelic/nri-bundle \
-            --version 8.0.24 \
-            --namespace newrelic \
-            -f k8s/observabilidade/newrelic-values.yaml \
-            --wait --timeout 5m
-
       - name: Aplicar ConfigMap e manifestos da aplicacao
         run: |
           kubectl apply -f k8s/base/01-configmap.yaml
@@ -216,6 +184,38 @@ jobs:
 
           echo "FALHA: /healthz/ready nao respondeu 200 a tempo."
           exit 1
+
+      # RFC-004, secao 6.1: metricas de CPU/memoria de node e pod nao vem do OTLP da aplicacao -
+      # exigem o Kubernetes integration da New Relic, instalado DEPOIS do deploy e do smoke test da
+      # aplicacao para que uma falha do agente de observabilidade nao bloqueie a subida do sistema
+      # principal. helm upgrade --install e idempotente (seguro rodar em todo deploy). Values
+      # versionados em k8s/observabilidade/newrelic-values.yaml documentam a conta de capacidade e
+      # por que cada componente extra do bundle esta desligado.
+      - name: Instalar Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      - name: Criar/atualizar Secret da license key (namespace newrelic)
+        env:
+          NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+        run: |
+          echo "::add-mask::$NEW_RELIC_LICENSE_KEY"
+          kubectl create namespace newrelic --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create secret generic newrelic-license-key \
+            --namespace newrelic \
+            --from-literal=licenseKey="$NEW_RELIC_LICENSE_KEY" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Instalar/atualizar nri-bundle (New Relic Kubernetes integration)
+        run: |
+          helm repo add newrelic https://helm-charts.newrelic.com
+          helm repo update
+          helm upgrade --install newrelic-bundle newrelic/nri-bundle \
+            --version 8.0.24 \
+            --namespace newrelic \
+            -f k8s/observabilidade/newrelic-values.yaml \
+            --wait --timeout 5m
 
       - name: Estado do cluster (evidencia nos logs)
         if: always()
