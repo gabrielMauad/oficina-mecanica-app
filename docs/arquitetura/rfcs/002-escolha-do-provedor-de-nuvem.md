@@ -63,6 +63,24 @@ em [`docs/spec/aws-academy.pdf`](../../spec/aws-academy.pdf)):
 Complementares também disponíveis e usados no desenho: **VPC**, **Elastic Load Balancing**,
 **Secrets Manager**, **CloudWatch**, **EC2 Auto Scaling**.
 
+> **Atualização — VPC default, não uma VPC criada.** Este RFC e o
+> [diagrama de infraestrutura](../diagramas/infraestrutura.md) originalmente presumiam que
+> `oficina-mecanica-infra-k8s` criaria sua própria VPC (subnets públicas/privadas, Internet
+> Gateway, NAT Gateway) — é o desenho que o Terraform daquele repositório teve até ser
+> simplificado. Uma auditoria contra os limites reais da conta mostrou que a Fase 3 exige EKS com
+> escalabilidade, mas **não exige criar VPC**, e que a VPC default da conta já atende ao mínimo de
+> 2 AZs que o EKS exige. O Terraform passou a usar a VPC default via `data` sources — sem criar
+> VPC, subnets, Internet Gateway, NAT Gateway ou route tables — o que elimina o custo e o ponto de
+> falha do NAT Gateway (ver
+> [`oficina-mecanica-infra-k8s` PR #3](https://github.com/gabrielMauad/oficina-mecanica-infra-k8s/pull/3)).
+>
+> Consequência aceita: os nós do EKS ficam em subnet **pública** (IP público automático), em vez de
+> subnet privada atrás do NAT. Isso não abre a aplicação para a internet — os security groups
+> dedicados (não o SG default da VPC) continuam sendo a única proteção de tráfego, e a única
+> entrada pública é o API Gateway. É uma troca deliberada de isolamento de rede por custo e
+> simplicidade, aceitável para uma demonstração acadêmica; numa conta de produção real a VPC
+> voltaria a ser criada, com os nós em subnet privada.
+
 ## 5. Decisão
 
 **AWS**, na conta AWS Academy Learner Lab, com:
