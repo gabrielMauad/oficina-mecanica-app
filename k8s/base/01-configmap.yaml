@@ -21,10 +21,13 @@ data:
   Jwt__ValidIssuers__1: "oficina-mecanica-auth"
   Auth__AdminEmail: "admin@oficina.com"
   OpenApi__Enabled: "true"
-  # OTEL_EXPORTER_OTLP_ENDPOINT NAO esta definido aqui de proposito: o Service
-  # "otel-collector.oficina-mecanica.svc.cluster.local" nunca existiu neste cluster, e mante-lo
-  # so gerava erro de exportacao em loop nos logs contra um host que nunca resolve. Sem a
-  # variavel, o SDK do OpenTelemetry cai no default "http://localhost:4317" (nao trava a
-  # aplicacao - so nao exporta de fato, ate a ferramenta de APM ser escolhida, RFC-004). Quando
-  # for escolhida, esta chave volta aqui apontando para o destino real (coletor/APM), e a chave
-  # de API, se precisar, vai no Secret (OTEL_EXPORTER_OTLP_HEADERS), nunca aqui.
+  # OTEL_EXPORTER_OTLP_ENDPOINT NAO esta definido aqui de proposito: apontava para um Service
+  # ("otel-collector.oficina-mecanica.svc.cluster.local") que nao existe neste cluster. Sem a
+  # variavel, o SDK do OpenTelemetry para .NET cai no default "http://localhost:4317" e descarta
+  # traces e metricas silenciosamente - nao trava a aplicacao e nao polui os logs do pod: falha de
+  # exportacao e reportada no self-diagnostics do proprio OpenTelemetry (EventSource, ex.:
+  # "OpenTelemetry-Exporter-OpenTelemetryProtocol"), nunca no ILogger/logs JSON da aplicacao. Isso
+  # vale ate a ferramenta de APM ser configurada (RFC-004): quando isso acontecer, esta chave volta
+  # aqui apontando para o destino real, e a chave de API vai no Secret (OTEL_EXPORTER_OTLP_HEADERS),
+  # nunca aqui. Para depurar exportacao, o lugar certo e o self-diagnostics do OpenTelemetry, nao os
+  # logs da aplicacao.

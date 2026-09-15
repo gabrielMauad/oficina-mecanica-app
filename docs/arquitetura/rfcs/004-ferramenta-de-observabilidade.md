@@ -235,9 +235,14 @@ Kubernetes `Secret` como destino no cluster) se aplica sem alteração:
    deve vir de um `Secret` (`--set-file` ou `valuesFrom` apontando para o segredo montado), não como
    literal no `values.yaml` versionado.
 
-Isso é uma continuação direta do que o README já documenta sobre `k8s/base/02-secret.yaml`: hoje o
-arquivo é um placeholder para desenvolvimento local; em produção a chave nunca é literal no YAML
-commitado.
+Isso é uma continuação direta do que já vale hoje para os demais segredos da aplicação: não existe
+mais um `k8s/base/02-secret.yaml` commitado. O Secret `oficina-secrets` é criado pela própria
+pipeline (`.github/workflows/ci-cd.yml`, job "Deploy no EKS"), que lê os segredos do AWS Secrets
+Manager (`oficina-mecanica/dev/rds/postgresql` e `oficina-mecanica/dev/app`) por nome, aplica
+`::add-mask::` em cada valor e monta o `Secret` em runtime com `kubectl create secret generic
+oficina-secrets ... --dry-run=client -o yaml | kubectl apply -f -`. A license key da New Relic
+seguiria o mesmo caminho (via `OTEL_EXPORTER_OTLP_HEADERS`, passo 3 acima): nenhuma chave de API
+fica literal em YAML versionado.
 
 > **Caminho mais simples, provavelmente preferível.** O passo 2 acima assume o External Secrets
 > Operator ou o Secrets Manager CSI driver — e ambos normalmente exigem **IRSA**, que exige criar um
