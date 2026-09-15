@@ -21,7 +21,7 @@ desenvolvido como **Tech Challenge da pós-graduação em Arquitetura de Softwar
 - [Deploy na Nuvem (AWS)](#deploy-na-nuvem-aws)
 - [CI/CD](#cicd)
 - [Autenticação](#autenticação)
-- [Observabilidade (OpenTelemetry)](#observabilidade-opentelemetry)
+- [Observabilidade (OpenTelemetry + New Relic)](#observabilidade-opentelemetry--new-relic)
 - [APIs — Documentação e Collection](#apis--documentação-e-collection)
 - [Testes](#testes)
 - [Vídeo Demonstrativo](#vídeo-demonstrativo)
@@ -338,12 +338,16 @@ balanceamento), comportamento coberto por teste de integração em
 
 ---
 
-## Observabilidade (OpenTelemetry)
+## Observabilidade (OpenTelemetry + New Relic)
 
-Traces e métricas via **OpenTelemetry .NET**, exportados por **OTLP** — ver
-[ADR-004](docs/arquitetura/adrs/004-correlacao-via-traceid-w3c.md) para a decisão completa de
-correlação. Tudo isolado em
-[`src/Bootstrap/Api/Extensions/ObservabilityExtensions.cs`](src/Bootstrap/Api/Extensions/ObservabilityExtensions.cs).
+Traces, métricas e logs via **OpenTelemetry .NET**, exportados por **OTLP** para o **New Relic**
+(decisão em [RFC-004](docs/arquitetura/rfcs/004-ferramenta-de-observabilidade.md); correlação
+log↔trace em [ADR-004](docs/arquitetura/adrs/004-correlacao-via-traceid-w3c.md)). Instrumentação
+isolada em
+[`src/Bootstrap/Api/Extensions/ObservabilityExtensions.cs`](src/Bootstrap/Api/Extensions/ObservabilityExtensions.cs)
+(traces + métricas) e
+[`src/Bootstrap/Api/Extensions/LoggingExtensions.cs`](src/Bootstrap/Api/Extensions/LoggingExtensions.cs)
+(logs — console JSON estruturado **e** OTLP, lado a lado).
 
 **O que é instrumentado:**
 - **ASP.NET Core** — requisições de entrada (latência das APIs).
@@ -353,24 +357,47 @@ correlação. Tudo isolado em
 - **Runtime** (`OpenTelemetry.Instrumentation.Runtime`) — CPU, memória e GC do processo, para
   correlacionar com o consumo visto pelo `kubectl top pods` / HPA.
 - Os **meters de negócio** da aplicação (`OficinaMecanica.OrdensServico`,
-  `OficinaMecanica.Integracoes`) já estão registrados no provedor de métricas — as métricas em si
-  são publicadas por outra frente de trabalho.
+  `OficinaMecanica.Integracoes`, ver [`docs/arquitetura/metricas.md`](docs/arquitetura/metricas.md))
+  já estão registrados no provedor de métricas.
+- **Logs**, via o provedor de logging do OpenTelemetry (`builder.Logging.AddOpenTelemetry(...)`) —
+  cada linha carrega `trace_id`/`span_id` nativamente, o que o New Relic usa para vincular log e
+  trace na interface sem configuração adicional.
 
 **Amostragem em 100%** (`AlwaysOnSampler`), decisão da ADR-004: nenhum trace usado como evidência
 para o vídeo de entrega pode ser descartado. Isso é deliberado para o volume deste projeto — **não
 seria adequado em produção real**, onde amostragem parcial é necessária.
 
-**Destino configurável, sem acoplamento a fornecedor.** O SDK usa as variáveis de ambiente padrão
-do OpenTelemetry — não há nenhum SDK/agente da New Relic ou Datadog no código:
+**Temporalidade delta nas métricas** — configurada em código (`TemporalityPreference.Delta` no
+metric reader do exportador OTLP), porque é a temporalidade que o backend do New Relic espera;
+deixar no padrão cumulativo do SDK produziria somas erradas em contadores como "volume diário de
+OS".
+
+**Destino configurável por variável de ambiente, sem SDK/agente proprietário no código:**
 
 | Variável | Efeito |
 |---|---|
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | Endpoint OTLP (gRPC) de destino — coletor local, New Relic, Datadog Agent, etc. |
-| `OTEL_EXPORTER_OTLP_HEADERS` | Headers extras (ex.: chave de API do APM), no formato `chave1=valor1,chave2=valor2` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Endpoint OTLP de destino — coletor local (Jaeger), New Relic, etc. |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | Protocolo do exportador (`http/protobuf` em produção, na porta 4318 — ver [ConfigMap](k8s/base/01-configmap.yaml)) |
+| `OTEL_EXPORTER_OTLP_HEADERS` | Headers extras — em produção, `api-key=<license key>` do New Relic, no formato `chave1=valor1,chave2=valor2` |
 
-No ambiente **`Testing`** (usado pelo `WebApplicationFactory` dos testes de integração) o SDK do
-OpenTelemetry **não é registrado** — sem isso, a suíte tentaria exportar para um coletor
-inexistente, seria mais lenta e mais ruidosa nos logs.
+Em Kubernetes essas variáveis apontam para `https://otlp.nr-data.net:4318` (New Relic, data center
+US) — endpoint no `ConfigMap` (não é segredo), `api-key` no `Secret` `oficina-secrets` (é segredo,
+nunca em texto plano). Localmente continuam apontando para o Jaeger do compose (abaixo).
+
+No ambiente **`Testing`** (usado pelo `WebApplicationFactory` dos testes de integração) **nada**
+disso é registrado — nem traces/métricas, nem logs por OTLP — sem coletor disponível, a suíte
+tentaria exportar para um destino inexistente, seria mais lenta e mais ruidosa.
+
+### Kubernetes: CPU e memória do cluster (`nri-bundle`)
+
+O OTLP da aplicação cobre o processo da API, não o cluster inteiro. CPU/memória por nó e por pod
+vêm do **Kubernetes integration da New Relic**, instalado via Helm (chart `nri-bundle`) pela
+própria pipeline, no namespace `newrelic`, antes de aplicar os manifestos da aplicação — ver o job
+"Deploy no EKS" em
+[`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml) e os values versionados em
+[`k8s/observabilidade/newrelic-values.yaml`](k8s/observabilidade/newrelic-values.yaml) (que também
+documenta, em comentário, por que cada componente não essencial do bundle está desligado — os nós
+são `t3.small` e a HPA precisa de espaço para escalar até 5 réplicas).
 
 ### Verificação local (sem ferramenta paga)
 
@@ -390,14 +417,21 @@ docker compose up --build
 - Os logs (`docker compose logs api`) continuam em JSON com `trace_id`/`span_id`
   (`TraceJsonConsoleFormatter`, ADR-004) — o mesmo `trace_id` visto no log aparece na busca por
   Trace ID do Jaeger, fechando a correlação log → trace.
+- O provedor de logging OTLP também fica ativo localmente (o compose roda em `Development`, não em
+  `Testing`) e tenta exportar logs para o mesmo endpoint do Jaeger. O Jaeger **não** implementa o
+  serviço OTLP de logs — essas tentativas falham silenciosamente no self-diagnostics do próprio
+  OpenTelemetry (mesmo comportamento que métricas já têm hoje contra o Jaeger, que também não é
+  consumidor de métricas), nunca no `ILogger`/console da aplicação. `docker compose logs api`
+  continua limpo, só com as linhas JSON do `TraceJsonConsoleFormatter`.
 
-Em Kubernetes, `OTEL_EXPORTER_OTLP_ENDPOINT` **não está definido hoje** no
-[`ConfigMap`](k8s/base/01-configmap.yaml) — o Service `otel-collector` hipotético nunca existiu no
-cluster, e mantê-lo só gerava erro de exportação em loop nos logs; sem a variável, o SDK cai no
-default `http://localhost:4317` e simplesmente não exporta. Quando a ferramenta de APM (New
-Relic/Datadog, RFC-004) for escolhida, essa chave volta ao `ConfigMap` apontando para o destino
-real (e, se precisar de chave de API, ela vai como `OTEL_EXPORTER_OTLP_HEADERS` no `Secret`
-`oficina-secrets` — nunca em texto plano no ConfigMap).
+### Depois do deploy — configuração na interface do New Relic
+
+Dashboard, alertas e monitor sintético não são provisionáveis pela pipeline (contas de terceiro,
+sem Terraform) — o roteiro de configuração manual está em
+[`docs/observabilidade/`](docs/observabilidade/):
+[`dashboard-oficina-mecanica.json`](docs/observabilidade/dashboard-oficina-mecanica.json)
+(importável), [`alertas.md`](docs/observabilidade/alertas.md) e
+[`uptime.md`](docs/observabilidade/uptime.md).
 
 ---
 

@@ -102,7 +102,13 @@ jobs:
       # Le os segredos do RDS e da aplicacao por NOME (nunca ARN - o ARN muda a cada recriacao),
       # monta o Secret do Kubernetes em runtime e aplica de forma idempotente. Nenhum valor e
       # impresso no log: cada um recebe ::add-mask:: antes de qualquer outro uso.
+      #
+      # A license key da New Relic (RFC-004, secao 6.2) NAO vem do Secrets Manager - e um dado de
+      # conta de terceiro, nao um recurso da AWS - e sim direto de um secret do GitHub
+      # (NEW_RELIC_LICENSE_KEY) para o Secret do Kubernetes, sem operador adicional nem IRSA.
       - name: Criar/atualizar Secret oficina-secrets
+        env:
+          NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
         run: |
           RDS_SECRET=$(aws secretsmanager get-secret-value \
             --secret-id oficina-mecanica/dev/rds/postgresql --query SecretString --output text)
@@ -117,7 +123,7 @@ jobs:
           JWT_SECRET=$(echo "$APP_SECRET" | jq -r .jwt_secret)
           ADMIN_SENHA=$(echo "$APP_SECRET" | jq -r .admin_senha)
 
-          for v in "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$DB_PASSWORD" "$JWT_SECRET" "$ADMIN_SENHA"; do
+          for v in "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$DB_PASSWORD" "$JWT_SECRET" "$ADMIN_SENHA" "$NEW_RELIC_LICENSE_KEY"; do
             echo "::add-mask::$v"
           done
 
@@ -126,11 +132,17 @@ jobs:
           CONNECTION_STRING="Host=${DB_HOST};Port=${DB_PORT};Database=${DB_NAME};Username=${DB_USER};Password=${DB_PASSWORD};SSL Mode=Require"
           echo "::add-mask::$CONNECTION_STRING"
 
+          # Formato exigido pelo header OTLP da New Relic (RFC-004, secao "Destino OTLP e
+          # autenticacao): "api-key=<license key>", lido pelo OTEL_EXPORTER_OTLP_HEADERS.
+          OTLP_HEADERS="api-key=${NEW_RELIC_LICENSE_KEY}"
+          echo "::add-mask::$OTLP_HEADERS"
+
           kubectl create secret generic oficina-secrets \
             --namespace oficina-mecanica \
             --from-literal=ConnectionStrings__Default="$CONNECTION_STRING" \
             --from-literal=Jwt__Secret="$JWT_SECRET" \
             --from-literal=Auth__AdminSenha="$ADMIN_SENHA" \
+            --from-literal=OTEL_EXPORTER_OTLP_HEADERS="$OTLP_HEADERS" \
             --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Aplicar ConfigMap e manifestos da aplicacao
@@ -173,8 +185,43 @@ jobs:
           echo "FALHA: /healthz/ready nao respondeu 200 a tempo."
           exit 1
 
+      # RFC-004, secao 6.1: metricas de CPU/memoria de node e pod nao vem do OTLP da aplicacao -
+      # exigem o Kubernetes integration da New Relic, instalado DEPOIS do deploy e do smoke test da
+      # aplicacao para que uma falha do agente de observabilidade nao bloqueie a subida do sistema
+      # principal. helm upgrade --install e idempotente (seguro rodar em todo deploy). Values
+      # versionados em k8s/observabilidade/newrelic-values.yaml documentam a conta de capacidade e
+      # por que cada componente extra do bundle esta desligado.
+      - name: Instalar Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      - name: Criar/atualizar Secret da license key (namespace newrelic)
+        env:
+          NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+        run: |
+          echo "::add-mask::$NEW_RELIC_LICENSE_KEY"
+          kubectl create namespace newrelic --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create secret generic newrelic-license-key \
+            --namespace newrelic \
+            --from-literal=licenseKey="$NEW_RELIC_LICENSE_KEY" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Instalar/atualizar nri-bundle (New Relic Kubernetes integration)
+        run: |
+          helm repo add newrelic https://helm-charts.newrelic.com
+          helm repo update
+          helm upgrade --install newrelic-bundle newrelic/nri-bundle \
+            --version 8.0.24 \
+            --namespace newrelic \
+            -f k8s/observabilidade/newrelic-values.yaml \
+            --wait --timeout 5m
+
       - name: Estado do cluster (evidencia nos logs)
         if: always()
         run: |
           kubectl get pods,svc,hpa -n oficina-mecanica || true
           kubectl top pods -n oficina-mecanica || true
+          kubectl get pods -n newrelic -o wide || true
+          kubectl top pods -n newrelic || true
+          kubectl top nodes || true

@@ -8,10 +8,11 @@ namespace Api.Extensions;
 /// <summary>
 /// Configura o SDK do OpenTelemetry (traces + métricas), exportado via OTLP (ADR-004). O
 /// destino é resolvido pelas variáveis de ambiente padrão do OpenTelemetry
-/// (<c>OTEL_EXPORTER_OTLP_ENDPOINT</c>, <c>OTEL_EXPORTER_OTLP_HEADERS</c>), lidas
-/// automaticamente pelo <see cref="OpenTelemetry.Exporter.OtlpExporterOptions"/> — não há
-/// nada específico de fornecedor (New Relic/Datadog/etc.) neste código, para que a escolha do
-/// APM continue em aberto.
+/// (<c>OTEL_EXPORTER_OTLP_ENDPOINT</c>, <c>OTEL_EXPORTER_OTLP_PROTOCOL</c>,
+/// <c>OTEL_EXPORTER_OTLP_HEADERS</c>), lidas automaticamente pelo
+/// <see cref="OpenTelemetry.Exporter.OtlpExporterOptions"/> — não há nada específico de
+/// fornecedor (New Relic/Datadog/etc.) neste código; RFC-004 escolheu o New Relic como destino,
+/// mas a troca continua sendo só variável de ambiente.
 /// </summary>
 public static class ObservabilityExtensions
 {
@@ -31,12 +32,7 @@ public static class ObservabilityExtensions
         if (builder.Environment.IsEnvironment("Testing"))
             return builder;
 
-        var resourceBuilder = ResourceBuilder.CreateDefault()
-            .AddService(serviceName: "oficina-mecanica-api", serviceNamespace: "oficina-mecanica")
-            .AddAttributes(
-            [
-                new KeyValuePair<string, object>("deployment.environment", builder.Environment.EnvironmentName)
-            ]);
+        var resourceBuilder = BuildResourceBuilder(builder);
 
         builder.Services.AddOpenTelemetry()
             .WithTracing(tracing => tracing
@@ -56,8 +52,27 @@ public static class ObservabilityExtensions
                 .AddHttpClientInstrumentation()
                 .AddRuntimeInstrumentation() // CPU, memória e GC do processo
                 .AddMeter(ApplicationMeterNames)
-                .AddOtlpExporter());
+                // RFC-004/New Relic recomenda temporalidade delta para métricas OTLP (o backend é
+                // delta-nativo; cumulativo custa mais memória/ingestão e é a causa mais comum de
+                // somas erradas em contadores como "volume diário de OS" quando o dashboard soma
+                // valores já cumulativos). Setado em código — não em variável de ambiente — porque
+                // é o único jeito garantido de valer nesta versão do SDK (1.18.0).
+                .AddOtlpExporter((_, readerOptions) =>
+                    readerOptions.TemporalityPreference = MetricReaderTemporalityPreference.Delta));
 
         return builder;
     }
+
+    /// <summary>
+    /// Resource comum (nome/namespace do serviço + ambiente) compartilhado entre traces,
+    /// métricas (acima) e logs (<see cref="LoggingExtensions.AddOtlpLogging"/>), para que os três
+    /// sinais apareçam correlacionados sob a mesma entidade no backend.
+    /// </summary>
+    internal static ResourceBuilder BuildResourceBuilder(WebApplicationBuilder builder) =>
+        ResourceBuilder.CreateDefault()
+            .AddService(serviceName: "oficina-mecanica-api", serviceNamespace: "oficina-mecanica")
+            .AddAttributes(
+            [
+                new KeyValuePair<string, object>("deployment.environment", builder.Environment.EnvironmentName)
+            ]);
 }

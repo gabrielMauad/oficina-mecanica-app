@@ -1,0 +1,108 @@
+# Values do chart nri-bundle (New Relic Kubernetes integration), RFC-004 secao 6.1.
+#
+# Instalado pela pipeline (.github/workflows/ci-cd.yml, job "Deploy no EKS"), ANTES dos
+# manifestos da aplicacao, via:
+#
+#   helm upgrade --install newrelic-bundle newrelic/nri-bundle \
+#     --version 8.0.24 \
+#     --namespace newrelic --create-namespace \
+#     -f k8s/observabilidade/newrelic-values.yaml
+#
+# Versao do chart fixada em 8.0.24 (tag existente em
+# https://github.com/newrelic/helm-charts/tree/nri-bundle-8.0.24 - confirmada em 2026-09-15).
+# Reconferir se houver uma janela de tempo grande ate a execucao.
+#
+# Cobre SO o requisito "CPU e memoria do Kubernetes" (metricas de node/pod). Traces, metricas de
+# negocio e runtime do processo .NET ja saem por OTLP direto da aplicacao (k8s/base/01-configmap.yaml)
+# - nao dependem deste chart.
+#
+# License key: NAO fica aqui (nunca em texto plano em values versionado). A pipeline cria o Secret
+# do Kubernetes "newrelic-license-key" no namespace "newrelic" a partir do secret do GitHub
+# NEW_RELIC_LICENSE_KEY (mesmo secret usado em OTEL_EXPORTER_OTLP_HEADERS, k8s/base/01-configmap.yaml
+# e o Secret oficina-secrets), e o chart le esse Secret via global.customSecretName/
+# customSecretLicenseKey abaixo - nunca via --set global.licenseKey.
+
+global:
+  cluster: oficina-mecanica
+  customSecretName: newrelic-license-key
+  customSecretLicenseKey: licenseKey
+  # Reduz o volume de dados enviado (amostra o agente de infra a cada 30s em vez de 15s, corta
+  # atributos de baixo valor) - recomendado pela New Relic para clusters pequenos como este, e
+  # ajuda a nao pressionar a cota de 100 GB/mes do plano gratuito (RFC-004, secao 4.1).
+  lowDataMode: true
+
+# --- Agente de infraestrutura (obrigatorio: e ele quem publica CPU/memoria de node e pod) ---
+newrelic-infrastructure:
+  enabled: true
+  privileged: true
+  # O control plane do EKS e gerenciado pela AWS e nao e acessivel pelos nos deste cluster
+  # (RFC-002) - deixar habilitado so gera tentativas de scrape que falham e ruido de log, sem
+  # nenhum dado a mais.
+  controlPlane:
+    enabled: false
+  # kube-state-metrics (abaixo) e quem fornece metricas de estado do cluster (pods/deployments/etc);
+  # este agente ainda precisa dele habilitado para enriquecer node/pod com esses dados.
+  ksm:
+    enabled: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 150Mi
+    limits:
+      cpu: 200m
+      memory: 300Mi
+
+# --- kube-state-metrics: exigido pelo agente de infra para metricas de pod/node completas ---
+# Desabilitado por padrao no chart (kube-state-metrics.enabled=false) - precisa ser ligado
+# explicitamente para cobrir o requisito de CPU/memoria por pod.
+kube-state-metrics:
+  enabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+# --- Tudo abaixo e explicitamente desligado: nao e requisito desta tarefa e cada um custa pods/
+# recursos que os nos t3.small nao tem sobra para gastar (ver conta de capacidade no PR) ---
+
+# Logs ja saem por OTLP direto da aplicacao (Tarefa 3) - o forwarder de log do cluster seria
+# redundante (e so cobriria stdout, que a aplicacao ja envia por um caminho melhor, com contexto
+# de trace nativo).
+newrelic-logging:
+  enabled: false
+
+# Webhook de metadata injection (mutating webhook em todo pod criado no cluster) - nao e
+# necessario para metricas de node/pod, e webhooks admission adicionam latencia/risco a criacao
+# de qualquer pod do cluster, incluindo os da propria aplicacao durante o HPA escalando.
+nri-metadata-injection:
+  enabled: false
+
+# Eventos do Kubernetes (Warning/Normal do cluster) - nao e requisito da spec (CPU/memoria e
+# healthcheck, nao um feed de eventos).
+nri-kube-events:
+  enabled: false
+
+# Scraper de endpoints Prometheus customizados - a aplicacao nao expoe /metrics Prometheus (usa
+# OTLP), entao nao ha nada para este componente coletar.
+nri-prometheus:
+  enabled: false
+
+# eBPF profiling (Pixie) - fora de escopo (spec pede CPU/memoria, nao profiling continuo), e e o
+# componente mais pesado do bundle.
+newrelic-pixie:
+  enabled: false
+pixie-chart:
+  enabled: false
+
+# Metrics adapter para HPA custom/external metrics via New Relic - o HPA deste projeto usa metrica
+# nativa de CPU (metrics-server, k8s/app/22-api-hpa.yaml), nao precisa de metrica externa.
+newrelic-k8s-metrics-adapter:
+  enabled: false
+
+# Operator adicional para injection via CRDs - default do chart ja e false; mantido explicito por
+# clareza (nao usamos annotations de auto-instrumentacao neste projeto).
+newrelic-infra-operator:
+  enabled: false
