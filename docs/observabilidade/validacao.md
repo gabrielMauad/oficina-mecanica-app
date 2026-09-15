@@ -26,17 +26,20 @@ esses nomes foram corrigidos.
 **`K8sContainerSample`** (`clusterName = 'oficina-mecanica'`): `cpuUsedCores`,
 `memoryWorkingSetBytes`, `memoryUsedBytes`, `cpuLimitCores`, `memoryLimitBytes`,
 `cpuRequestedCores`, `memoryRequestedBytes`, `podName`, `containerName`, `namespaceName`,
-`nodeName`, `deploymentName`, `restartCount`. O widget de CPU/memória por pod usava
-`K8sPodSample`, que não é o event type que carrega esses atributos na integração instalada neste
-cluster — foi trocado por `K8sContainerSample`, mantendo os mesmos campos, filtro
-(`clusterName = 'oficina-mecanica' AND namespaceName = 'oficina-mecanica'`) e `FACET podName`.
+`nodeName`, `deploymentName`, `restartCount`. Os widgets de CPU e memória por pod (hoje "CPU do
+cluster, por pod (cores)" e "Memória do cluster, por pod" — ver seção "Ajustes de visualização"
+sobre a divisão em dois widgets) usavam `K8sPodSample`, que não é o event type que carrega esses
+atributos na integração instalada neste cluster — foi trocado por `K8sContainerSample`, mantendo
+os mesmos campos, filtro (`clusterName = 'oficina-mecanica' AND namespaceName = 'oficina-mecanica'`)
+e `FACET podName`.
 
 **`K8sNodeSample`**: o event type existe e recebe dados neste cluster, mas seus atributos não
-foram (e não precisaram ser) enumerados por `keyset()` nesta rodada de validação. O widget "CPU e
-memória do cluster, por nó" mantém `cpuUsedCores` e `memoryUsedBytes`, que são os atributos
-documentados pela integração Kubernetes da New Relic para esse event type — por isso o título
-**não** carrega mais um `TODO`, mesmo sem uma segunda confirmação por `keyset()` especificamente
-para `K8sNodeSample`.
+foram (e não precisaram ser) enumerados por `keyset()` nesta rodada de validação. Os widgets "CPU
+do cluster, por nó (cores)" e "Memória do cluster, por nó" (antes um único widget "CPU e memória
+do cluster, por nó" — ver "Ajustes de visualização") mantêm `cpuUsedCores` e `memoryUsedBytes`,
+que são os atributos documentados pela integração Kubernetes da New Relic para esse event type —
+por isso o título **não** carrega mais um `TODO`, mesmo sem uma segunda confirmação por
+`keyset()` especificamente para `K8sNodeSample`.
 
 ## Filtro de health check
 
@@ -111,6 +114,55 @@ monitor sintético `oficina-mecanica-healthz` for criado (roteiro em
 [`uptime.md`](uptime.md)). O `TODO` foi removido do título porque a consulta em si está correta —
 o widget passa a mostrar dado assim que o monitor existir; não depende de nenhuma correção de
 nome de atributo.
+
+## Ajustes de visualização
+
+O dashboard foi importado (com `accountId` real) e testado contra os mesmos dados desta validação.
+As **consultas** de todos os widgets conferiram — os três problemas abaixo eram só de
+**visualização** (tipo de gráfico, eixo, período), e foram corrigidos sem tocar em nenhuma NRQL
+que já estava certa.
+
+### 1. "Tempo médio por etapa" parecia vazio
+
+A consulta usava `TIMESERIES 1 hour` num gráfico de linha (`viz.line`). Como todo o tráfego de
+teste caiu dentro de uma única hora, cada `FACET etapa` produzia **um único ponto** — e um gráfico
+de linha não desenha linha com um ponto só, então a tela mostrava apenas marcas quase invisíveis
+na borda. Correção: removido o `TIMESERIES` (a consulta virou um agregado simples por etapa) e a
+visualização trocada para barras (`viz.bar`), com o título deixando explícito que o valor é em
+segundos.
+
+### 2. CPU invisível nos widgets de cluster
+
+Os widgets "CPU e memória do cluster, por nó" e "…, por pod" colocavam CPU (em cores, ex.: `0,05`)
+e memória (em bytes, ex.: `1,5 GB`) na mesma série/eixo. Na escala dos bytes, a linha de CPU fica
+colada no zero e desaparece visualmente. Correção: cada widget foi dividido em dois, um por
+métrica/unidade — "CPU do cluster, por nó (cores)", "Memória do cluster, por nó", "CPU do
+cluster, por pod (cores)" e "Memória do cluster, por pod" — todos em `viz.line`, mesmas consultas
+e filtros de antes, cada um agora com uma única métrica.
+
+### 3. "Volume diário de OS" não aparecia como diário
+
+O **período selecionado no dashboard** (ex.: "Since 3 hours ago") é menor que o balde de
+`TIMESERIES 1 day` da consulta. Quando isso acontece, o New Relic ignora o balde pedido e escolhe
+baldes automáticos de poucos minutos, produzindo picos de 1–2 em vez de uma barra por dia.
+Correção: a consulta continua `TIMESERIES 1 day SINCE 7 days ago`, a visualização virou barras
+empilhadas (`viz.stacked-bar`, uma barra por dia, simples + completa empilhados), e o widget
+carrega uma `description` (tooltip, visível ao passar o mouse) avisando que **o período do
+dashboard precisa ser de pelo menos alguns dias** (ex.: "Since 7 days ago") para os baldes diários
+aparecerem.
+
+### Identificadores de visualização usados
+
+Confirmados na documentação oficial da New Relic e no código-fonte público do provider Terraform
+mantido pela própria New Relic (que mapeia cada tipo de widget para o id usado no NerdGraph):
+
+- `viz.line` e `viz.billboard` — exemplos de JSON em
+  [Import, export, and add dashboards and charts](https://docs.newrelic.com/docs/query-your-data/explore-query-data/dashboards/dashboards-charts-import-export-data/).
+- `viz.bar`, `viz.billboard`, `viz.table` (entre outros) — exemplos de JSON em
+  [NerdGraph tutorial: Create and configure dashboard widgets](https://docs.newrelic.com/docs/apis/nerdgraph/examples/create-widgets-dashboards-api/).
+- `viz.stacked-bar` — mapeamento `widget_stacked_bar` → `"viz.stacked-bar"` em
+  [`structures_newrelic_one_dashboard.go`](https://github.com/newrelic/terraform-provider-newrelic/blob/main/newrelic/structures_newrelic_one_dashboard.go),
+  no repositório oficial `newrelic/terraform-provider-newrelic`.
 
 ## Resumo das correções aplicadas
 
