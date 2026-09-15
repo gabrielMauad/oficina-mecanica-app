@@ -117,7 +117,7 @@ flowchart TB
         direction TB
         gw["API Gateway<br/>roteamento e controle de acesso"]
 
-        subgraph vpc["VPC"]
+        subgraph vpc["VPC default da conta (subnets públicas, sem VPC própria)"]
             direction TB
             authFn["Function Serverless de autenticação<br/>oficina-mecanica-lambda-auth"]
 
@@ -157,10 +157,12 @@ não rodam em nenhuma nuvem: rodam hoje no ambiente local descrito acima.
 
 **Topologia de repositórios** (ver
 [ADR-005](../adrs/005-quatro-repositorios-e-estrategia-de-branches.md)): o Terraform deste alvo
-se divide em dois repositórios — `oficina-mecanica-infra-k8s` (VPC + cluster + node groups +
-API Gateway) e `oficina-mecanica-infra-db` (banco gerenciado) — que publicam outputs (endpoint do
+se divide em dois repositórios — `oficina-mecanica-infra-k8s` (cluster + node groups + API
+Gateway) e `oficina-mecanica-infra-db` (banco gerenciado) — que publicam outputs (endpoint do
 banco, nome do cluster) consumidos pelos repositórios `oficina-mecanica-lambda-auth` e
-`oficina-mecanica-app` via estado remoto.
+`oficina-mecanica-app` via estado remoto. Nenhum dos dois cria VPC própria: ambos usam a VPC
+default da conta AWS Academy Learner Lab via `data` sources — ver
+[RFC-002](../rfcs/002-escolha-do-provedor-de-nuvem.md) ("Atualização — VPC default").
 
 **Diferenças concretas em relação ao ambiente local:**
 
