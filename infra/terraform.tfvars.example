@@ -1,5 +1,0 @@
-# copie para terraform.tfvars e ajuste conforme necessário
-cluster_name = "oficina-mecanica"
-# local (após 'kind load'):   oficina-mecanica-api:local
-# CI (Docker Hub):            docker.io/SEU_USUARIO/oficina-mecanica-api:latest
-api_image    = "oficina-mecanica-api:local"

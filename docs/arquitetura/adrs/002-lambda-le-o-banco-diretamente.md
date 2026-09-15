@@ -58,3 +58,20 @@ ela não faria nenhuma das três — seria um repasse removível sem alterar o c
   (Cognito, Keycloak) leem seu próprio store diretamente.
 - *A Lambda precisa estar na VPC para alcançar o banco gerenciado*, o que aumenta o tempo de
   inicialização a frio. Impacto restrito ao login e tratado na fase de infraestrutura.
+
+## Nota de execução (2026-09-15)
+
+O **usuário de banco dedicado, somente-leitura**, previsto na Decisão acima **não foi
+implementado** nesta etapa. Criá-lo exige executar SQL (`CREATE USER`/`GRANT`) **dentro da VPC**,
+já que o RDS não é público (`publicly_accessible = false`) — e não há, nesta conta AWS Academy
+Learner Lab, um caminho viável para rodar esse SQL a partir do runner do GitHub Actions (sem
+bastion, sem túnel provisionado, e criar um só para isso não se justifica para uma única
+instrução SQL).
+
+Nesta etapa, a Lambda (repositório `oficina-mecanica-lambda-auth`, pasta `infra/`) usa as
+**mesmas credenciais** (`username`/`password`) do secret `oficina-mecanica/dev/rds/postgresql`
+que a aplicação usa — a Lambda tem, na prática, permissão de escrita que nunca exerce (o código em
+`ClienteRepository.cs` só executa `SELECT`). O isolamento de código continua valendo (a Lambda
+não tem nenhuma linha que escreva no banco); o que não foi alcançado é o isolamento de
+**privilégio** a nível de banco de dados. Registrado como limitação conhecida no README daquele
+repositório.

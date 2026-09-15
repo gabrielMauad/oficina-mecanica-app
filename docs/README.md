@@ -9,7 +9,7 @@
 |---|---|
 | [`diagramas/componentes.md`](arquitetura/diagramas/componentes.md) | **Desenho dos componentes** (C4 níveis 1–4, incluindo implantação em nuvem — implementado vs. alvo, Mermaid) |
 | [`diagramas/sequencia-abertura-os.md`](arquitetura/diagramas/sequencia-abertura-os.md) | **Diagrama de sequência** da abertura de uma OS — rotas simples e completa, pipeline MediatR, ACL e eventos (Mermaid) |
-| [`diagramas/infraestrutura.md`](arquitetura/diagramas/infraestrutura.md) | **Desenho da infraestrutura** — ambiente local (kind, `docker compose`) e ambiente alvo em nuvem, ainda não provisionado (Mermaid) |
+| [`diagramas/infraestrutura.md`](arquitetura/diagramas/infraestrutura.md) | **Desenho da infraestrutura** — ambiente local (`docker compose`) e ambiente de nuvem (AWS Academy: EKS, RDS, API Gateway, Lambda) (Mermaid) |
 | [`diagramas/fluxo-deploy.md`](arquitetura/diagramas/fluxo-deploy.md) | **Desenho do fluxo de deploy** (CI/CD, Mermaid) |
 | [`diagramas/sequencia-autenticacao.md`](arquitetura/diagramas/sequencia-autenticacao.md) | **Sequência de autenticação** — cliente por CPF e oficina por email/senha (Mermaid) |
 | [`estrutura-do-projeto.md`](arquitetura/estrutura-do-projeto.md) | Decisões de estrutura, papel de cada projeto, regras de referência |
@@ -46,5 +46,10 @@ Planos de implementação e specs de refatoração (histórico de execução do 
 | Pasta / Documento | Conteúdo |
 |---|---|
 | [`spec/`](spec/) | Enunciados oficiais FIAP/SOAT (PDFs das Fases 1, 2 e 3) e a lista de serviços da conta AWS Academy (`aws-academy.pdf`), referência do [RFC-002](arquitetura/rfcs/002-escolha-do-provedor-de-nuvem.md) |
-| [`../infra/README.md`](../infra/README.md) | Documentação dos recursos Terraform e passo a passo de apply/destroy |
 | [`images/`](images/) | Imagens (relatórios de cobertura) |
+
+A pasta `infra/` (Terraform do cluster **kind** local da Fase 2) foi removida deste repositório —
+a partir da Fase 3 o Terraform vive em três repositórios dedicados:
+[`oficina-mecanica-infra-k8s`](https://github.com/gabrielMauad/oficina-mecanica-infra-k8s),
+[`oficina-mecanica-infra-db`](https://github.com/gabrielMauad/oficina-mecanica-infra-db) e
+[`oficina-mecanica-lambda-auth`](https://github.com/gabrielMauad/oficina-mecanica-lambda-auth).

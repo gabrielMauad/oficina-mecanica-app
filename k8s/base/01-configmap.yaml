@@ -6,7 +6,14 @@ metadata:
   labels:
     app.kubernetes.io/part-of: oficina-mecanica
 data:
-  ASPNETCORE_ENVIRONMENT: "Development"
+  # Production, nao Development: o publish do SDK inclui appsettings.Development.json na imagem
+  # (nao ha exclusao no .csproj/Dockerfile), mas com ASPNETCORE_ENVIRONMENT=Production o ASP.NET
+  # Core so carrega appsettings.json + appsettings.Production.json (inexistente) - o arquivo de
+  # Development fica no disco do container sem nunca ser lido. Toda configuracao obrigatoria em
+  # runtime vem deste ConfigMap e do Secret oficina-secrets (criado pela pipeline). Nenhum
+  # IsDevelopment()/branch de ambiente existe no codigo (Program.cs e Extensions/*), so o rotulo
+  # deployment.environment do OpenTelemetry muda.
+  ASPNETCORE_ENVIRONMENT: "Production"
   ASPNETCORE_URLS: "http://+:8080"
   Jwt__Issuer: "oficina-mecanica-app"
   Jwt__Audience: "oficina-mecanica-api"
@@ -14,8 +21,10 @@ data:
   Jwt__ValidIssuers__1: "oficina-mecanica-auth"
   Auth__AdminEmail: "admin@oficina.com"
   OpenApi__Enabled: "true"
-  # Destino do OTLP (traces + métricas). Sem nada específico de fornecedor: aponta para o
-  # coletor/APM escolhido (ex.: OpenTelemetry Collector, Datadog Agent, New Relic OTLP
-  # endpoint). Chave de API de fornecedor, se necessária, vai em Secret (OTEL_EXPORTER_OTLP_HEADERS
-  # com "api-key=..."), nunca aqui.
-  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector.oficina-mecanica.svc.cluster.local:4317"
+  # OTEL_EXPORTER_OTLP_ENDPOINT NAO esta definido aqui de proposito: o Service
+  # "otel-collector.oficina-mecanica.svc.cluster.local" nunca existiu neste cluster, e mante-lo
+  # so gerava erro de exportacao em loop nos logs contra um host que nunca resolve. Sem a
+  # variavel, o SDK do OpenTelemetry cai no default "http://localhost:4317" (nao trava a
+  # aplicacao - so nao exporta de fato, ate a ferramenta de APM ser escolhida, RFC-004). Quando
+  # for escolhida, esta chave volta aqui apontando para o destino real (coletor/APM), e a chave
+  # de API, se precisar, vai no Secret (OTEL_EXPORTER_OTLP_HEADERS), nunca aqui.

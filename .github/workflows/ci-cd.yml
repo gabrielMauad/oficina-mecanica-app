@@ -5,6 +5,11 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+env:
+  AWS_REGION: us-east-1
+  EKS_CLUSTER_NAME: oficina-mecanica
+  ECR_REPOSITORY: oficina-mecanica-api
+
 jobs:
   build-test:
     name: Build & Test
@@ -27,19 +32,39 @@ jobs:
       - name: Test
         run: dotnet test OficinaMecanica.slnx --no-build --configuration Release --verbosity normal
 
+  # A conta e uma AWS Academy Learner Lab - nao permite IAM role/OIDC (ADR-006), entao autentica
+  # com as tres credenciais de sessao temporarias, renovadas manualmente a cada sessao do
+  # laboratorio. A URL do repositorio ECR e resolvida em runtime (describe-repositories), nunca
+  # com a conta gravada em codigo - ela muda a cada recriacao da infraestrutura (infra-k8s).
   docker-image:
-    name: Build & Push image
+    name: Build & Push image (ECR)
     needs: build-test
     runs-on: ubuntu-latest
+    environment: aws-academy
+    outputs:
+      image: ${{ steps.image.outputs.uri }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Docker login
-        uses: docker/login-action@v3
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login no Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Resolver URL do repositorio ECR e a tag da imagem
+        id: image
+        run: |
+          REPO_URI=$(aws ecr describe-repositories \
+            --repository-names "${{ env.ECR_REPOSITORY }}" \
+            --query "repositories[0].repositoryUri" --output text)
+          echo "uri=${REPO_URI}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -47,58 +72,109 @@ jobs:
           context: .
           file: src/Bootstrap/Api/Dockerfile
           push: true
-          tags: |
-            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/oficina-mecanica-api:latest
-            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/oficina-mecanica-api:${{ github.sha }}
+          tags: ${{ steps.image.outputs.uri }}
 
-
+  # Aplica os manifestos de k8s/ contra o cluster EKS persistente (oficina-mecanica-infra-k8s) -
+  # este workflow nao cria infraestrutura nenhuma, so publica a aplicacao nela.
   deploy:
-    name: Deploy to Kubernetes (kind)
+    name: Deploy no EKS
     needs: docker-image
     runs-on: ubuntu-latest
+    environment: aws-academy
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          terraform_version: '1.9.5'
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Terraform Init
-        working-directory: infra
-        run: terraform init -input=false
+      - name: Configurar kubeconfig do cluster EKS
+        run: aws eks update-kubeconfig --name "${{ env.EKS_CLUSTER_NAME }}" --region "${{ env.AWS_REGION }}"
 
-      - name: Terraform Apply — passo 1 (cria o cluster kind primeiro)
-        working-directory: infra
-        run: terraform apply -auto-approve -input=false -target=kind_cluster.this
+      - name: Namespace
+        run: kubectl apply -f k8s/base/00-namespace.yaml
 
-      - name: Terraform Apply — passo 2 (deploy do banco e da app)
-        working-directory: infra
+      # Le os segredos do RDS e da aplicacao por NOME (nunca ARN - o ARN muda a cada recriacao),
+      # monta o Secret do Kubernetes em runtime e aplica de forma idempotente. Nenhum valor e
+      # impresso no log: cada um recebe ::add-mask:: antes de qualquer outro uso.
+      - name: Criar/atualizar Secret oficina-secrets
         run: |
-          terraform apply -auto-approve -input=false \
-            -var="api_image=docker.io/${{ secrets.DOCKERHUB_USERNAME }}/oficina-mecanica-api:${{ github.sha }}"
+          RDS_SECRET=$(aws secretsmanager get-secret-value \
+            --secret-id oficina-mecanica/dev/rds/postgresql --query SecretString --output text)
+          APP_SECRET=$(aws secretsmanager get-secret-value \
+            --secret-id oficina-mecanica/dev/app --query SecretString --output text)
 
-      - name: Smoke test (/healthz via NodePort)
+          DB_HOST=$(echo "$RDS_SECRET" | jq -r .host)
+          DB_PORT=$(echo "$RDS_SECRET" | jq -r .port)
+          DB_NAME=$(echo "$RDS_SECRET" | jq -r .dbname)
+          DB_USER=$(echo "$RDS_SECRET" | jq -r .username)
+          DB_PASSWORD=$(echo "$RDS_SECRET" | jq -r .password)
+          JWT_SECRET=$(echo "$APP_SECRET" | jq -r .jwt_secret)
+          ADMIN_SENHA=$(echo "$APP_SECRET" | jq -r .admin_senha)
+
+          for v in "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$DB_PASSWORD" "$JWT_SECRET" "$ADMIN_SENHA"; do
+            echo "::add-mask::$v"
+          done
+
+          # RDS PostgreSQL 16 desta conta exige TLS por padrao (rds.force_ssl = 1) - sem
+          # "SSL Mode=Require" a conexao e recusada.
+          CONNECTION_STRING="Host=${DB_HOST};Port=${DB_PORT};Database=${DB_NAME};Username=${DB_USER};Password=${DB_PASSWORD};SSL Mode=Require"
+          echo "::add-mask::$CONNECTION_STRING"
+
+          kubectl create secret generic oficina-secrets \
+            --namespace oficina-mecanica \
+            --from-literal=ConnectionStrings__Default="$CONNECTION_STRING" \
+            --from-literal=Jwt__Secret="$JWT_SECRET" \
+            --from-literal=Auth__AdminSenha="$ADMIN_SENHA" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Aplicar ConfigMap e manifestos da aplicacao
         run: |
-          echo "aguardando a API responder em localhost:30080..."
+          kubectl apply -f k8s/base/01-configmap.yaml
+          sed "s|IMAGE_PLACEHOLDER|${{ needs.docker-image.outputs.image }}|" k8s/app/20-api-deployment.yaml | kubectl apply -f -
+          kubectl apply -f k8s/app/21-api-service.yaml
+          kubectl apply -f k8s/app/22-api-hpa.yaml
+
+      - name: Aguardar rollout
+        run: kubectl rollout status deployment/oficina-api -n oficina-mecanica --timeout=5m
+
+      # Descobre o endpoint pelo NOME da API (nunca hardcoded - muda a cada recriacao) e valida a
+      # cadeia inteira: API Gateway -> VPC Link -> NLB -> NodePort -> pod -> RDS. Com retentativas
+      # porque a NLB leva alguns minutos apos o deploy para marcar o alvo como saudavel.
+      - name: Smoke test (GET /healthz/ready via API Gateway)
+        run: |
+          API_ENDPOINT=$(aws apigatewayv2 get-apis \
+            --query "Items[?Name=='oficina-mecanica-api'].ApiEndpoint | [0]" \
+            --output text)
+
+          if [ -z "$API_ENDPOINT" ] || [ "$API_ENDPOINT" == "None" ]; then
+            echo "FALHA: nao foi possivel resolver o endpoint da API 'oficina-mecanica-api'."
+            exit 1
+          fi
+
+          echo "Endpoint resolvido: $API_ENDPOINT"
+
           for i in $(seq 1 30); do
-            if curl -fsS http://localhost:30080/healthz; then
-              echo "OK: API respondeu 200"; exit 0
+            HTTP_STATUS=$(curl -sS -o /tmp/healthz.json -w "%{http_code}" "$API_ENDPOINT/healthz/ready" || echo "000")
+            if [ "$HTTP_STATUS" == "200" ]; then
+              echo "OK: /healthz/ready respondeu 200"
+              cat /tmp/healthz.json; echo
+              exit 0
             fi
+            echo "Tentativa $i: status $HTTP_STATUS, aguardando a NLB marcar o alvo como saudavel..."
             sleep 10
           done
-          echo "FALHA: API nao respondeu a tempo"; exit 1
 
-      - name: Estado do cluster (evidência nos logs)
+          echo "FALHA: /healthz/ready nao respondeu 200 a tempo."
+          exit 1
+
+      - name: Estado do cluster (evidencia nos logs)
         if: always()
-        env:
-          KUBECONFIG: ${{ github.workspace }}/infra/kubeconfig.yaml
         run: |
           kubectl get pods,svc,hpa -n oficina-mecanica || true
           kubectl top pods -n oficina-mecanica || true
-
-      - name: Terraform Destroy (limpa o cluster efêmero)
-        if: always()
-        working-directory: infra
-        run: terraform destroy -auto-approve -input=false || true
