@@ -52,6 +52,7 @@ Terraform — decisão de provedor em [RFC-002](../rfcs/002-escolha-do-provedor-
 ```mermaid
 flowchart TB
     ator["Atendente / Cliente"]
+    equipe["Equipe do projeto<br/>(e-mail)"]
 
     subgraph aws["AWS Academy Learner Lab — us-east-1"]
         direction TB
@@ -59,11 +60,12 @@ flowchart TB
 
         subgraph vpc["VPC default da conta (subnets publicas, sem NAT Gateway)"]
             direction TB
-            authFn["Function Serverless de autenticacao<br/>oficina-mecanica-lambda-auth"]
+            authFn["Function Serverless de autenticacao<br/>oficina-mecanica-lambda-auth<br/>(nao instrumentada, sem NAT/internet)"]
 
             subgraph eks["Cluster EKS (oficina-mecanica)<br/>node group t3.small, 2-3 nos"]
                 direction TB
                 api["Aplicacao .NET 10<br/>oficina-mecanica-app<br/>HPA 1-5 @ 50% CPU"]
+                nri["nri-bundle (Helm)<br/>namespace newrelic<br/>DaemonSet + kube-state-metrics"]
             end
 
             nlb["NLB interna<br/>target group: NodePort 30080"]
@@ -72,7 +74,7 @@ flowchart TB
 
         secrets["Secrets Manager<br/>segredo do RDS + segredo da aplicacao (JWT/admin)"]
         ecr["Amazon ECR<br/>oficina-mecanica-api"]
-        apm["Ferramenta de APM<br/>Datadog ou New Relic - escolha pendente (RFC-004)"]
+        apm["New Relic<br/>APM, dashboards e alertas (RFC-004)"]
     end
 
     ator -->|"HTTPS/JSON"| gw
@@ -84,21 +86,30 @@ flowchart TB
     authFn -.->|"le segredos no apply (Terraform)"| secrets
     api -.->|"le segredos no deploy (pipeline)"| secrets
     ecr -.->|"imagem publicada"| api
-    api -.->|"OTLP: traces + metricas"| apm
+    api -.->|"OTLP http/protobuf :4318: traces + metricas + logs"| apm
+    nri -.->|"metricas de CPU/memoria de nos e pods"| apm
+    apm -.->|"Synthetic (Ping): GET /healthz/ready"| gw
+    apm -.->|"alerta de dashboard/monitor"| equipe
 
     classDef existente fill:#1168bd,stroke:#0b4884,color:#fff
     class ator fill:#08427b,stroke:#052e56,color:#fff
-    class gw,vpc,eks,api,rds,secrets,ecr,authFn,nlb,aws existente
-    classDef pendente fill:#ffffff,stroke:#999999,color:#555555,stroke-dasharray: 5 5
-    class apm pendente
+    class equipe fill:#08427b,stroke:#052e56,color:#fff
+    class gw,vpc,eks,api,rds,secrets,ecr,authFn,nlb,aws,apm,nri existente
 ```
 
-**Legenda:** só a caixa do APM (`apm`) está com borda tracejada — a ferramenta ainda não foi
-escolhida (RFC-004). Todo o resto do diagrama está **provisionado**: cluster EKS, NLB, API
-Gateway, ECR e o segredo da aplicação nascem em `oficina-mecanica-infra-k8s`; o RDS e seu segredo
-em `oficina-mecanica-infra-db`; a Function e sua rota no API Gateway em
-`oficina-mecanica-lambda-auth`; a imagem e os manifestos da API neste repositório
-(`oficina-mecanica-app`).
+**Legenda:** todas as caixas deste diagrama estão **provisionadas** — nenhuma está mais pendente.
+Cluster EKS, NLB, API Gateway, ECR e o segredo da aplicação nascem em
+`oficina-mecanica-infra-k8s`; o RDS e seu segredo em `oficina-mecanica-infra-db`; a Function e sua
+rota no API Gateway em `oficina-mecanica-lambda-auth`; a imagem, os manifestos da API e os
+`values` do `nri-bundle` (`k8s/observabilidade/newrelic-values.yaml`) neste repositório
+(`oficina-mecanica-app`). A ferramenta de observabilidade (`apm`) é o **New Relic**, decidido e
+implementado no [RFC-004](../rfcs/004-ferramenta-de-observabilidade.md): a aplicação exporta
+traces, métricas e logs por OTLP (`http/protobuf`, `otlp.nr-data.net:4318`); o `nri-bundle`
+(Helm, namespace `newrelic`) publica CPU/memória de nós e pods; um monitor sintético (Ping,
+`oficina-mecanica-healthz`) verifica `GET /healthz/ready` através do próprio API Gateway; e
+dashboards/alertas notificam a equipe por e-mail (ver `docs/observabilidade/`). A **Function
+Serverless não é instrumentada**: roda em subnet sem NAT Gateway, sem alcance à internet para
+exportar OTLP (ADR-004, RFC-004).
 
 **Topologia de repositórios** (ver
 [ADR-005](../adrs/005-quatro-repositorios-e-estrategia-de-branches.md)): o Terraform deste
@@ -119,7 +130,7 @@ VPC própria: todos usam a VPC default da conta AWS Academy Learner Lab via `dat
 | Entrada de tráfego | Porta exposta direto no host (`8080`) | **API Gateway** com roteamento e controle de acesso, via NLB interna |
 | Autenticação por CPF | Assinatura manual de JWT (sem Function rodando) | **Function Serverless** real, atrás do API Gateway |
 | Segredos | Variáveis de ambiente do `docker-compose.yml` | **Secrets Manager**, resolvidos no apply/deploy — nunca commitados |
-| Telemetria (destino) | Jaeger local (`docker compose`) | Ferramenta de APM (Datadog ou New Relic — escolha pendente, RFC-004) |
+| Telemetria (destino) | Jaeger local (`docker compose`) | **New Relic** — OTLP (traces, métricas e logs) + `nri-bundle` para CPU/memória do cluster (RFC-004) |
 | Terraform | Não se aplica | State remoto (S3), um repositório por peça de infraestrutura |
 
 A aplicação já exporta OTLP e já expõe health checks — isso **não muda** entre os dois ambientes,

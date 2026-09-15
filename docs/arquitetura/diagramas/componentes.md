@@ -121,13 +121,15 @@ flowchart TB
     subgraph nuvem["Nuvem — provedor a definir<br/>(AWS é hipótese de trabalho; decisão formal no RFC-002, pendente)"]
         direction TB
         gateway["API Gateway<br/>roteamento e controle de acesso"]
-        authFn["Function Serverless de autenticação<br/>valida CPF, consulta cadastro.cliente, emite JWT<br/>repositório próprio: oficina-mecanica-lambda-auth"]
+        authFn["Function Serverless de autenticação<br/>valida CPF, consulta cadastro.cliente, emite JWT<br/>repositório próprio: oficina-mecanica-lambda-auth<br/>(não instrumentada, sem NAT/internet)"]
         subgraph k8s["Cluster Kubernetes gerenciado"]
             direction TB
             app["Aplicação .NET 10<br/>monólito modular, 4 Bounded Contexts"]
+            nri["nri-bundle (Helm)<br/>namespace newrelic"]
         end
         db[("Banco de dados gerenciado<br/>PostgreSQL, 1 schema por módulo")]
-        apm["Ferramenta de APM<br/>Datadog ou New Relic — escolha pendente"]
+        apm["New Relic<br/>APM, dashboards e alertas (RFC-004)"]
+        equipe["Equipe do projeto<br/>(e-mail)"]
     end
 
     atendente -->|"HTTPS/JSON, token papel Oficina"| gateway
@@ -138,16 +140,18 @@ flowchart TB
     authFn -.->|"token assinado (HS256)"| cliente
     authFn -->|"consulta cadastro.cliente (somente leitura)"| db
     app -->|"EF Core / Npgsql"| db
-    app -.->|"OTLP: traces + métricas"| apm
-    authFn -.->|"logs (via CloudWatch ou equivalente)"| apm
+    app -.->|"OTLP http/protobuf: traces + métricas + logs"| apm
+    nri -.->|"métricas de CPU/memória de nós e pods"| apm
+    apm -.->|"Synthetic (Ping): GET /healthz/ready"| gateway
+    apm -.->|"alerta de dashboard/monitor"| equipe
 
     classDef person fill:#08427b,stroke:#052e56,color:#fff
     classDef existente fill:#1168bd,stroke:#0b4884,color:#fff
     classDef alvo fill:#ffffff,stroke:#999999,color:#555555,stroke-dasharray: 5 5
 
     class atendente,cliente person
-    class app,authFn existente
-    class gateway,apm,db,k8s,nuvem alvo
+    class app,authFn,apm,nri,equipe existente
+    class gateway,db,k8s,nuvem alvo
 ```
 
 **Legenda:** caixa azul sólida = **implementado hoje**; caixa branca de borda tracejada = **alvo
@@ -156,14 +160,16 @@ da Fase 3, ainda não provisionado**.
 **O que já existe:** a **aplicação** (`app`) — o mesmo monólito modular dos níveis 1 a 3 — e a
 **Function Serverless de autenticação** (`authFn`) têm código e testes prontos em seus
 repositórios (ver [ADR-005](../adrs/005-quatro-repositorios-e-estrategia-de-branches.md)). A
-aplicação já emite traces e métricas via OpenTelemetry/OTLP e já expõe health checks — hoje esse
-tráfego roda **localmente** (kind ou `docker compose`, ver
-[`infraestrutura.md`](infraestrutura.md)), não na nuvem.
+aplicação já emite traces, métricas e logs via OpenTelemetry/OTLP e já expõe health checks — esse
+tráfego já vai para o **New Relic** (`apm`) em produção, decisão e implementação do
+[RFC-004](../rfcs/004-ferramenta-de-observabilidade.md); ver
+[`infraestrutura.md`](infraestrutura.md) para o desenho completo desse fluxo. A **Function
+Serverless não é instrumentada**: roda em subnet sem NAT Gateway, sem alcance à internet para
+exportar OTLP (ADR-004, RFC-004).
 
 **O que é alvo, ainda não provisionado:** **API Gateway**, **cluster Kubernetes gerenciado**
-(hoje é kind local), **banco de dados gerenciado** (hoje é PostgreSQL em pod) e a **ferramenta de
-APM** configurada para receber o OTLP que a aplicação já exporta. Nenhum desses quatro itens tem
-Terraform de nuvem escrito ainda — ver
+(hoje é kind local) e **banco de dados gerenciado** (hoje é PostgreSQL em pod). Nenhum desses três
+itens tem Terraform de nuvem escrito ainda — ver
 [`docs/planos/fase-3/00-analise-da-spec.md`](../../planos/fase-3/00-analise-da-spec.md), seção
 3.1, para o inventário completo de recursos e o que falta.
 
