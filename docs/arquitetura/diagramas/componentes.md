@@ -2,8 +2,9 @@
 
 > Modelo C4 (níveis 1 → 4) do **Sistema de Oficina Mecânica**, um _Modular Monolith_ em
 > .NET 10 com quatro Bounded Contexts e aderência à Clean Architecture. O nível 4
-> (implantação em nuvem) mistura o que já está implementado com o que é alvo da Fase 3 —
-> ver a legenda na respectiva seção.
+> (implantação em nuvem) mostra a topologia já provisionada na AWS ([RFC-002](../rfcs/002-escolha-do-provedor-de-nuvem.md))
+> — ver [`infraestrutura.md`](infraestrutura.md) para o detalhamento completo (NLB, VPC Link,
+> Secrets Manager, ECR e a divisão entre repositórios).
 > Diagramas em [Mermaid](https://mermaid.js.org/) — renderizam nativamente no GitHub.
 >
 > Documentação de apoio: [`estrutura-do-projeto.md`](../estrutura-do-projeto.md),
@@ -106,28 +107,31 @@ equivalente à "linguagem publicada" do BC.
 
 ---
 
-## Nível 4 — Implantação em Nuvem (alvo da Fase 3)
+## Nível 4 — Implantação em Nuvem (AWS Academy Learner Lab)
 
 A Fase 3 exige que este diagrama de componentes ganhe uma **visão de nuvem**: API Gateway, banco
 de dados, Kubernetes, Function Serverless e monitoramento. O diagrama abaixo é uma visão de
 **implantação** (deployment), não mais de código — mostra onde cada componente roda e como eles se
-falam quando o ambiente de nuvem existir.
+falam na AWS, provedor decidido e implementado conforme
+[RFC-002](../rfcs/002-escolha-do-provedor-de-nuvem.md) (Status: Aprovado).
 
 ```mermaid
 flowchart TB
     atendente["Atendente / Mecânico"]
     cliente["Cliente"]
 
-    subgraph nuvem["Nuvem — provedor a definir<br/>(AWS é hipótese de trabalho; decisão formal no RFC-002, pendente)"]
+    subgraph nuvem["AWS Academy Learner Lab — us-east-1<br/>(RFC-002)"]
         direction TB
-        gateway["API Gateway<br/>roteamento e controle de acesso"]
-        authFn["Function Serverless de autenticação<br/>valida CPF, consulta cadastro.cliente, emite JWT<br/>repositório próprio: oficina-mecanica-lambda-auth"]
-        subgraph k8s["Cluster Kubernetes gerenciado"]
+        gateway["Amazon API Gateway (HTTP API)<br/>roteamento e controle de acesso"]
+        authFn["AWS Lambda: Function Serverless de autenticação<br/>valida CPF, consulta cadastro.cliente, emite JWT<br/>repositório próprio: oficina-mecanica-lambda-auth<br/>(não instrumentada, sem NAT/internet)"]
+        subgraph k8s["Amazon EKS (cluster Kubernetes gerenciado)"]
             direction TB
             app["Aplicação .NET 10<br/>monólito modular, 4 Bounded Contexts"]
+            nri["nri-bundle (Helm)<br/>namespace newrelic"]
         end
-        db[("Banco de dados gerenciado<br/>PostgreSQL, 1 schema por módulo")]
-        apm["Ferramenta de APM<br/>Datadog ou New Relic — escolha pendente"]
+        db[("Amazon RDS PostgreSQL 16<br/>1 schema por módulo")]
+        apm["New Relic<br/>APM, dashboards e alertas (RFC-004)"]
+        equipe["Equipe do projeto<br/>(e-mail)"]
     end
 
     atendente -->|"HTTPS/JSON, token papel Oficina"| gateway
@@ -138,36 +142,38 @@ flowchart TB
     authFn -.->|"token assinado (HS256)"| cliente
     authFn -->|"consulta cadastro.cliente (somente leitura)"| db
     app -->|"EF Core / Npgsql"| db
-    app -.->|"OTLP: traces + métricas"| apm
-    authFn -.->|"logs (via CloudWatch ou equivalente)"| apm
+    app -.->|"OTLP http/protobuf: traces + métricas + logs"| apm
+    nri -.->|"métricas de CPU/memória de nós e pods"| apm
+    apm -.->|"Synthetic (Ping): GET /healthz/ready"| gateway
+    apm -.->|"alertas (workflow → e-mail)"| equipe
 
     classDef person fill:#08427b,stroke:#052e56,color:#fff
     classDef existente fill:#1168bd,stroke:#0b4884,color:#fff
-    classDef alvo fill:#ffffff,stroke:#999999,color:#555555,stroke-dasharray: 5 5
 
     class atendente,cliente person
-    class app,authFn existente
-    class gateway,apm,db,k8s,nuvem alvo
+    class app,authFn,apm,nri,equipe,gateway,db,k8s,nuvem existente
 ```
 
-**Legenda:** caixa azul sólida = **implementado hoje**; caixa branca de borda tracejada = **alvo
-da Fase 3, ainda não provisionado**.
+**Legenda:** todas as caixas deste diagrama estão **implementadas e provisionadas hoje** — não há
+mais itens-alvo pendentes neste nível.
 
-**O que já existe:** a **aplicação** (`app`) — o mesmo monólito modular dos níveis 1 a 3 — e a
-**Function Serverless de autenticação** (`authFn`) têm código e testes prontos em seus
-repositórios (ver [ADR-005](../adrs/005-quatro-repositorios-e-estrategia-de-branches.md)). A
-aplicação já emite traces e métricas via OpenTelemetry/OTLP e já expõe health checks — hoje esse
-tráfego roda **localmente** (kind ou `docker compose`, ver
-[`infraestrutura.md`](infraestrutura.md)), não na nuvem.
+**Estado atual: tudo provisionado.** Desde a decisão do [RFC-002](../rfcs/002-escolha-do-provedor-de-nuvem.md)
+(AWS, conta AWS Academy Learner Lab) e sua execução, os cinco componentes exigidos pela Fase 3
+estão implementados e no ar: o **Amazon API Gateway** (`gateway`, HTTP API), a **Function
+Serverless** de autenticação (`authFn`, AWS Lambda — ver
+[ADR-005](../adrs/005-quatro-repositorios-e-estrategia-de-branches.md)), o **cluster Kubernetes
+gerenciado** (`k8s`, Amazon EKS) rodando a aplicação (`app`), o **banco de dados gerenciado**
+(`db`, Amazon RDS PostgreSQL) e a ferramenta de observabilidade (`apm`, **New Relic** — decidida e
+implementada no [RFC-004](../rfcs/004-ferramenta-de-observabilidade.md)): a aplicação já emite
+traces, métricas e logs via OpenTelemetry/OTLP e já expõe health checks, e esse tráfego já vai
+para o New Relic em produção. Este diagrama simplifica a topologia para o nível de componentes; o
+desenho completo — NLB interna, VPC Link, NodePort, Secrets Manager, ECR e a divisão do Terraform
+entre os três repositórios de infraestrutura — está em [`infraestrutura.md`](infraestrutura.md).
 
-**O que é alvo, ainda não provisionado:** **API Gateway**, **cluster Kubernetes gerenciado**
-(hoje é kind local), **banco de dados gerenciado** (hoje é PostgreSQL em pod) e a **ferramenta de
-APM** configurada para receber o OTLP que a aplicação já exporta. Nenhum desses quatro itens tem
-Terraform de nuvem escrito ainda — ver
-[`docs/planos/fase-3/00-analise-da-spec.md`](../../planos/fase-3/00-analise-da-spec.md), seção
-3.1, para o inventário completo de recursos e o que falta.
+A **Function Serverless não é instrumentada**: roda em subnet sem NAT Gateway, sem alcance à
+internet para exportar OTLP (ADR-004, RFC-004).
 
-**Sobre o provedor:** o diagrama usa vocabulário genérico (API Gateway, banco gerenciado, cluster
-Kubernetes gerenciado) porque a escolha de nuvem **ainda não é uma decisão formal** — o RFC-002
-está pendente. AWS aparece nos planos como hipótese de trabalho (API Gateway, EKS, RDS), mas este
-diagrama não deve ser lido como confirmação de que a nuvem já foi escolhida.
+**Sobre o provedor:** a escolha é **AWS**, decidida e registrada no
+[RFC-002](../rfcs/002-escolha-do-provedor-de-nuvem.md) (Status: Aprovado) — ver lá as restrições
+reais da conta AWS Academy Learner Lab (seção 6: sem criação de IAM role própria, VPC default sem
+NAT Gateway, limites de dimensionamento) que moldam esta topologia.

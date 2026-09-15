@@ -27,3 +27,5 @@ Ver [`../rfcs/`](../rfcs/).
 | [ADR-004](004-correlacao-via-traceid-w3c.md) | Correlação de requisições via `traceId` do W3C/OpenTelemetry | Aceita |
 | [ADR-005](005-quatro-repositorios-e-estrategia-de-branches.md) | Quatro repositórios e estratégia de branches | Aceita |
 | [ADR-006](006-credenciais-de-nuvem-no-cicd.md) | Credenciais de nuvem no CI/CD | Aceita |
+| [ADR-007](007-padrao-de-comunicacao-entre-modulos.md) | Padrão de comunicação entre módulos | Aceita |
+| [ADR-008](008-escalonamento-horizontal-com-hpa.md) | Escalonamento horizontal com HPA | Aceita |

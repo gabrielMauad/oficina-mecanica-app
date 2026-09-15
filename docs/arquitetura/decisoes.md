@@ -48,6 +48,9 @@ Infrastructure implementa um _adapter_ que chama os Contracts do produtor e trad
 orçamento gerado → decrementa estoque). Integration events vivem nos `<Modulo>.Contracts`.
 Nenhum módulo referencia diretamente Domain ou Application de outro módulo.
 
+Racional completo, com exemplos de código e alternativas descartadas (broker externo, HTTP entre
+módulos), em [ADR-007](adrs/007-padrao-de-comunicacao-entre-modulos.md).
+
 ## Veiculo é imutável
 
 Placa, modelo, marca e ano são definidos na criação e não têm métodos de mutação. Não existe
