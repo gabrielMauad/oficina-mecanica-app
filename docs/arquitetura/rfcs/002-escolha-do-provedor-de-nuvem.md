@@ -81,6 +81,18 @@ Complementares também disponíveis e usados no desenho: **VPC**, **Elastic Load
 > simplicidade, aceitável para uma demonstração acadêmica; numa conta de produção real a VPC
 > voltaria a ser criada, com os nós em subnet privada.
 
+> **Atualização — a role do EKS é `LabRole`, não `LabEksClusterRole` (correção registrada em
+> 2026-09-15).** A tabela acima e a seção 6.1 afirmam, com base na lista oficial de serviços do AWS
+> Academy, que a conta tem roles pré-criadas dedicadas ao EKS (`LabEksClusterRole` para cluster e
+> nós). Isso não se confirmou na conta real desta turma. O `terraform plan` falhou com
+> `reading IAM Role (LabEksClusterRole): couldn't find resource`, e `aws iam list-roles` mostrou que
+> a única role com prefixo `Lab` disponível na conta é **`LabRole`**. O provisionamento foi refeito
+> referenciando `LabRole` tanto no cluster quanto no node group do EKS, e funcionou: o cluster EKS,
+> o node group e o add-on `metrics-server` foram criados com sucesso.
+>
+> Ou seja: a documentação oficial do AWS Academy diverge da conta real. A orientação repassada em
+> aula — usar `LabRole` para tudo — estava correta.
+
 ## 5. Decisão
 
 **AWS**, na conta AWS Academy Learner Lab, com:
@@ -104,6 +116,10 @@ pipeline funciona. Ignorá-las produz código que falha no `apply`.
 A conta permite criar apenas *service-linked roles*. Não é possível criar usuários, grupos ou roles
 comuns. Em contrapartida, existem roles pré-criadas: **`LabRole`** (uso geral, anexada a recursos) e
 **`LabEksClusterRole`** (cluster e nós do EKS).
+
+> **Atualização — mesma correção da seção 4.** Na conta real, `LabEksClusterRole` não existe; o
+> Terraform referencia `LabRole` também para o cluster e o node group do EKS. Ver
+> "Atualização — a role do EKS é `LabRole`, não `LabEksClusterRole`" na seção 4.
 
 **Consequência para o Terraform:** nenhum recurso `aws_iam_role` nos módulos. As roles são
 **referenciadas** com `data "aws_iam_role"` e seus ARNs passados aos recursos que as exigem
