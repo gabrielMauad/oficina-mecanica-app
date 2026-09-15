@@ -56,3 +56,25 @@ pelas decisões acima, e manter dois ids exigiria explicar a diferença sem ganh
   aceitável pelo volume, mas é uma configuração que não se levaria a um ambiente de produção real.
 - *O identificador é opaco e não escolhido por nós*, o que dificulta usá-lo como protocolo de
   atendimento ao usuário final. Irrelevante no escopo atual.
+
+## Nota de execução — 2026-09-15
+
+Integração com o New Relic ([RFC-004](../rfcs/004-ferramenta-de-observabilidade.md)):
+
+- **(a) Logs agora também são exportados por OTLP**, além do stdout. Até aqui, `trace_id`/`span_id`
+  só existiam na linha JSON do `TraceJsonConsoleFormatter` (console/stdout do container) — a
+  correlação log↔trace na interface do New Relic depende do contexto de trace vir *dentro* do
+  registro de log recebido por OTLP, não só no stdout que nenhum coletor de log está lendo neste
+  cluster. `builder.Logging.AddOpenTelemetry(...)`
+  (`src/Bootstrap/Api/Extensions/LoggingExtensions.cs`) resolve isso levando trace_id/span_id
+  nativamente a partir do mesmo `Activity.Current`, sem duplicar lógica de extração. O
+  `TraceJsonConsoleFormatter` e o stdout **continuam existindo** — esta ADR não muda, só ganha um
+  segundo caminho de exportação.
+- **(b) A Lambda de autenticação não foi instrumentada nesta etapa.** Ela roda numa VPC sem NAT
+  Gateway (RFC-002) e não alcança a internet — não há como exportar OTLP dela para o New Relic
+  (nem para nenhum backend externo) sem adicionar um NAT Gateway à infraestrutura, fora do escopo
+  desta tarefa. Na prática, isso significa que a correlação ponta a ponta funciona para os
+  componentes da aplicação (API → banco), mas **não** atravessa a função de autenticação: um
+  `trace_id` gerado na Lambda (se a instrumentação existisse) não aparece no New Relic, e o span
+  de login fica fora da árvore de trace visível no APM. Continua sendo uma limitação conhecida e
+  documentada, não um item resolvido por esta mudança.

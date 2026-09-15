@@ -307,3 +307,27 @@ estiver de pé — nenhum item aqui depende de código novo na aplicação.
   observação no PR desta mudança), que a amostragem 100% de traces vale enquanto o volume for baixo
   o suficiente para caber no plano gratuito — um ponto que o ADR-004 já sinaliza como "não seria
   adequado em produção de alto tráfego", mas que agora ganha um limite concreto (100 GB/mês).
+
+## Nota de execução — 2026-09-15
+
+O checklist da seção 6 foi implementado:
+
+- **Endpoint e protocolo:** `https://otlp.nr-data.net:4318`, `http/protobuf` (não gRPC/4317 — o
+  exportador OTLP do .NET 1.18.0 anexa `/v1/{sinal}` automaticamente por sinal quando só a
+  variável geral `OTEL_EXPORTER_OTLP_ENDPOINT` é definida com esse protocolo, evitando três
+  variáveis por sinal). `api-key` chega via `OTEL_EXPORTER_OTLP_HEADERS`, lido do secret do GitHub
+  `NEW_RELIC_LICENSE_KEY` para dentro do Secret `oficina-secrets` — nunca commitado.
+- **Temporalidade delta:** configurada em código
+  (`ObservabilityExtensions.cs`, `MetricReaderTemporalityPreference.Delta`), não em variável de
+  ambiente, seguindo a recomendação do New Relic para métricas OTLP.
+- **Logs por OTLP:** adicionados via `builder.Logging.AddOpenTelemetry(...)`
+  (`LoggingExtensions.cs`), lado a lado com o console JSON existente — nenhum dos dois substitui o
+  outro.
+- **`nri-bundle`:** instalado pela pipeline (job "Deploy no EKS"), values versionados em
+  `k8s/observabilidade/newrelic-values.yaml`, com a maioria dos componentes do bundle desligados
+  (não são requisito e os nós `t3.small` não têm folga para eles) — a conta de capacidade que
+  confirma que isso cabe nos dois nós está registrada no PR desta mudança.
+- **Dashboard e alertas:** `docs/observabilidade/` (dashboard importável, alertas e monitor
+  sintético) — ver seção 6.3 para o mapeamento sinal → widget/alerta, mantido.
+- **Lambda de autenticação não instrumentada** — roda em VPC sem NAT (RFC-002), sem alcance à
+  internet; ver nota de execução equivalente no ADR-004.

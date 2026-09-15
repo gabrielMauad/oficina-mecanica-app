@@ -21,13 +21,14 @@ data:
   Jwt__ValidIssuers__1: "oficina-mecanica-auth"
   Auth__AdminEmail: "admin@oficina.com"
   OpenApi__Enabled: "true"
-  # OTEL_EXPORTER_OTLP_ENDPOINT NAO esta definido aqui de proposito: apontava para um Service
-  # ("otel-collector.oficina-mecanica.svc.cluster.local") que nao existe neste cluster. Sem a
-  # variavel, o SDK do OpenTelemetry para .NET cai no default "http://localhost:4317" e descarta
-  # traces e metricas silenciosamente - nao trava a aplicacao e nao polui os logs do pod: falha de
-  # exportacao e reportada no self-diagnostics do proprio OpenTelemetry (EventSource, ex.:
-  # "OpenTelemetry-Exporter-OpenTelemetryProtocol"), nunca no ILogger/logs JSON da aplicacao. Isso
-  # vale ate a ferramenta de APM ser configurada (RFC-004): quando isso acontecer, esta chave volta
-  # aqui apontando para o destino real, e a chave de API vai no Secret (OTEL_EXPORTER_OTLP_HEADERS),
-  # nunca aqui. Para depurar exportacao, o lugar certo e o self-diagnostics do OpenTelemetry, nao os
-  # logs da aplicacao.
+  # RFC-004: destino OTLP e o New Relic (data center US), endpoint publico - nao e segredo, so a
+  # license key (OTEL_EXPORTER_OTLP_HEADERS) e, e essa vem do Secret oficina-secrets, nunca daqui.
+  # Protocolo http/protobuf na porta 4318, nao gRPC/4317: com o endpoint geral (sem variavel por
+  # sinal), o exportador OTLP do .NET (OpenTelemetry.Exporter.OpenTelemetryProtocol 1.18.0) anexa
+  # automaticamente /v1/traces, /v1/metrics e /v1/logs por sinal quando o protocolo e
+  # http/protobuf - um unico par de variaveis cobre os tres sinais
+  # (https://opentelemetry.io/docs/languages/sdk-configuration/otlp-exporter/). Documentacao da New
+  # Relic confirma o mesmo endpoint/porta
+  # (https://docs.newrelic.com/docs/opentelemetry/best-practices/opentelemetry-otlp/).
+  OTEL_EXPORTER_OTLP_ENDPOINT: "https://otlp.nr-data.net:4318"
+  OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"

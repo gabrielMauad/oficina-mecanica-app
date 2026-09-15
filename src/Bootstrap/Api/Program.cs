@@ -20,6 +20,7 @@ using SharedKernel.Application;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.AddStructuredJsonLogging();
+builder.AddOtlpLogging();
 builder.AddOficinaMecanicaObservability();
 
 builder.Services.AddOficinaMecanicaAuthentication(builder.Configuration);

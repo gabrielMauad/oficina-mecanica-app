@@ -20,7 +20,11 @@ services:
       # OTLP: destino configurável por variável de ambiente padrão do OpenTelemetry (ADR-004),
       # sem nada específico de fornecedor. Aqui aponta para o Jaeger local do compose; em outro
       # ambiente basta trocar o endpoint (e, se preciso, OTEL_EXPORTER_OTLP_HEADERS) para o
-      # coletor/APM real — nenhum código muda.
+      # coletor/APM real — nenhum código muda. Traces e métricas chegam no Jaeger normalmente;
+      # logs (RFC-004, Tarefa 3) também são exportados para este mesmo endpoint, mas o Jaeger
+      # all-in-one não implementa o serviço OTLP de logs — essas tentativas falham em silêncio no
+      # self-diagnostics do OpenTelemetry (mesmo padrão que métricas já tinham antes desta
+      # mudança), nunca no console/`docker compose logs api`.
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
     depends_on:
       postgres:
