@@ -21,6 +21,19 @@
 # NEW_RELIC_LICENSE_KEY (mesmo secret usado em OTEL_EXPORTER_OTLP_HEADERS, k8s/base/01-configmap.yaml
 # e o Secret oficina-secrets), e o chart le esse Secret via global.customSecretName/
 # customSecretLicenseKey abaixo - nunca via --set global.licenseKey.
+#
+# Conta de capacidade (2 nos t3.small, ~1,4 GiB alocaveis / ~1,93 vCPU alocavel cada - confirmado
+# via `kubectl describe nodes` em 2026-09-15; detalhada no PR desta mudanca):
+#   - kubelet (DaemonSet, 1 pod/no, containers kubelet+agent): requests 150m CPU / 250Mi mem,
+#     limits 300m CPU / 500Mi mem POR NO.
+#   - ksm - coletor do New Relic (Deployment, 1 replica, containers ksm+forwarder): requests
+#     80m CPU / 128Mi mem, limits 150m CPU / 256Mi mem (so em 1 dos 2 nos).
+#   - kube-state-metrics - subchart separado (Deployment, 1 replica): requests 50m CPU / 64Mi mem,
+#     limits 100m CPU / 128Mi mem (so em 1 dos 2 nos).
+# Somando ao que ja roda hoje no cluster (aws-node, kube-proxy, coredns x2, metrics-server x2) e
+# a aplicacao em ate 5 replicas (HPA, 256Mi request/replica), o uso de memoria (requests) fica em
+# ~82-85% da capacidade combinada dos 2 nos - cabe, mas apertado; o limite mais provavel de doer
+# primeiro e o de 11 pods/no (ENI do t3.small), nao memoria. Ver conclusao completa no PR.
 
 global:
   cluster: oficina-mecanica
@@ -40,17 +53,62 @@ newrelic-infrastructure:
   # nenhum dado a mais.
   controlPlane:
     enabled: false
-  # kube-state-metrics (abaixo) e quem fornece metricas de estado do cluster (pods/deployments/etc);
-  # este agente ainda precisa dele habilitado para enriquecer node/pod com esses dados.
+  # kube-state-metrics (o bloco "kube-state-metrics:" la embaixo, subchart separado) e quem
+  # fornece metricas de estado do cluster (pods/deployments/etc); este agente (ksm: abaixo) e o
+  # COLETOR do New Relic que consulta aquele kube-state-metrics - dois componentes diferentes.
+  #
+  # A partir da v3 do subchart newrelic-infrastructure (empacotado nesta versao do nri-bundle) o
+  # antigo `resources` unico (nivel raiz deste bloco) nao e mais aceito - a chart falha o render
+  # e pede para configurar por componente (ksm.resources / controlPlane.resources /
+  # kubelet.resources, ver NOTES.txt do subchart). Alem disso cada componente roda como um Pod de
+  # 2 containers, e o `<componente>.resources` "legado" (nivel do componente) so cobre 1 dos 2
+  # containers - por isso configuramos os dois containers de cada um explicitamente (ver
+  # `helm show values newrelic/newrelic-infrastructure --version 4.6.2`, que e a versao exata do
+  # subchart empacotada no nri-bundle 8.0.24):
+  #   kubelet.kubelet.resources -> container "kubelet" (scraper, le a API do Kubelet)
+  #   kubelet.agent.resources   -> container "agent" (infrastructure-bundle, encaminha os dados)
+  #   ksm.ksm.resources         -> container "ksm" (scraper, consulta o kube-state-metrics)
+  #   ksm.forwarder.resources   -> container "forwarder" (infrastructure-bundle, encaminha os dados)
+  # controlPlane.resources fica de fora: controlPlane.enabled=false (control plane gerenciado
+  # pela AWS, nao roda scraper nenhum aqui).
+  #
+  # kubelet e DaemonSet (1 pod por no) - e o que mais pesa na capacidade dos t3.small (ver conta
+  # de capacidade no PR). ksm e um Deployment (1 replica so), pesa bem menos.
   ksm:
     enabled: true
-  resources:
-    requests:
-      cpu: 100m
-      memory: 150Mi
-    limits:
-      cpu: 200m
-      memory: 300Mi
+    ksm:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 100m
+          memory: 128Mi
+    forwarder:
+      resources:
+        requests:
+          cpu: 30m
+          memory: 64Mi
+        limits:
+          cpu: 50m
+          memory: 128Mi
+  kubelet:
+    kubelet:
+      resources:
+        requests:
+          cpu: 100m
+          memory: 150Mi
+        limits:
+          cpu: 200m
+          memory: 300Mi
+    agent:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 100Mi
+        limits:
+          cpu: 100m
+          memory: 200Mi
 
 # --- kube-state-metrics: exigido pelo agente de infra para metricas de pod/node completas ---
 # Desabilitado por padrao no chart (kube-state-metrics.enabled=false) - precisa ser ligado
