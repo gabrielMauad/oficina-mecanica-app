@@ -38,16 +38,20 @@ SELECT sum(`oficina.integracoes.falhas`) FROM Metric
 **Sinal B — 5xx nas rotas de ordens de serviço:**
 
 ```sql
-SELECT percentage(count(*), WHERE numeric(http.status_code) >= 500) AS 'erro %'
+SELECT percentage(count(*), WHERE http.response.status_code >= 500) AS 'erro %'
 FROM Span
-WHERE service.name = 'oficina-mecanica-api' AND kind = 'server' AND name LIKE '%ordens-servico%'
+WHERE service.name = 'oficina-mecanica-api' AND span.kind = 'server'
+  AND url.path NOT LIKE '/healthz%' AND http.route LIKE '%ordens-servico%'
 ```
 
-> `TODO: confirmar no primeiro dado` — o nome do atributo de status HTTP no span
-> (`http.status_code` vs. `http.response.status_code`, dependendo da versão do semantic
-> convention usada por `OpenTelemetry.Instrumentation.AspNetCore` 1.18.0) e o padrão exato do
-> nome da rota (`name`) para as rotas de ordens de serviço devem ser confirmados olhando um span
-> real antes de ativar esta condição.
+> Atributos confirmados com dados reais (`keyset()` em `Span`, `service.name =
+> 'oficina-mecanica-api'`): `http.response.status_code` (numérico) e `span.kind` — não existem
+> `http.status_code` nem `kind`. O agrupamento/filtro de rota usa `http.route` (o template da
+> rota, ex.: `api/v1/ordens-servico/{id}/status`, conforme
+> `OrdemServicoApiController`, prefixo `api/v1/ordens-servico`), não `name`. O filtro
+> `url.path NOT LIKE '/healthz%'` exclui os health checks batidos pela NLB (a cada 10s por nó) e
+> pelo kubelet, que dominam o volume de spans de servidor e distorceriam a taxa de erro medida.
+> Ver `docs/observabilidade/validacao.md` para o procedimento de validação com dados reais.
 
 - **Tipo de condição:** NRQL, "Static" threshold.
 - **Limiar:** `above 0`, **at least once** in **5 minutos**.
@@ -72,11 +76,14 @@ criado em uptime.md (monitor "oficina-mecanica-healthz").
 
 ```sql
 SELECT percentile(duration.ms, 95) FROM Span
-WHERE service.name = 'oficina-mecanica-api' AND kind = 'server'
+WHERE service.name = 'oficina-mecanica-api' AND span.kind = 'server'
+  AND url.path NOT LIKE '/healthz%'
 ```
 
-> `TODO: confirmar no primeiro dado` — mesmo atributo `duration.ms` do dashboard
-> (`dashboard-oficina-mecanica.json`); confirmar antes de ativar.
+> Mesmo atributo `duration.ms` do dashboard (`dashboard-oficina-mecanica.json`), confirmado com
+> dados reais — ver `docs/observabilidade/validacao.md`. `span.kind` (não `kind`) e o filtro
+> `url.path NOT LIKE '/healthz%'` excluem os health checks da NLB/kubelet, que senão dominariam a
+> amostra e distorceriam o p95 de latência medido.
 
 - **Limiar sugerido:** `above 2000` (2 segundos) por **5 minutos**, "at least once".
 - **Justificativa do limiar:** não há SLA formal definido para este projeto acadêmico; 2s é um
