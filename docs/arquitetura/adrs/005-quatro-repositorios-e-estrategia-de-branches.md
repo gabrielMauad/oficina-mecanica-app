@@ -105,3 +105,21 @@ não há equipe para validar em homologação antes de promover.
 branches de homologação e produção"* fica atendido **apenas na parte de produção**. Esta é uma
 decisão consciente de escopo, não uma omissão — e deve ser apresentada como tal na documentação de
 entrega e na demonstração em vídeo.
+
+## Nota de execução — pendência da pasta `infra/` resolvida (2026-09-15)
+
+A "Nota de execução (2026-09-10)" acima registrava como pendência mover `infra/` (Terraform do
+cluster **kind** local da Fase 2) para `oficina-mecanica-infra-k8s`, no mesmo Pull Request que
+introduzisse o Terraform de nuvem. Quando esse Terraform foi introduzido naquele repositório
+(cluster EKS via `aws_eks_cluster`/`aws_eks_node_group` diretos — não o módulo
+`terraform-aws-modules/eks`, ver README de `oficina-mecanica-infra-k8s`), a pendência não foi
+fechada junto.
+
+Ao migrar o deploy da aplicação para a nuvem (`oficina-mecanica-app`, pipeline `ci-cd.yml`), ficou
+claro que **não há nada para migrar**: o Terraform de `infra/` provisionava um cluster **kind**
+inteiro (`kind_cluster`, `helm_release` do metrics-server, `kubectl_manifest` para cada manifesto)
+— um desenho específico de cluster efêmero local, sem equivalente 1:1 no cluster EKS gerenciado,
+que já nasceu com desenho próprio em `oficina-mecanica-infra-k8s`. A pendência é resolvida por
+**remoção**, não por migração: `infra/` foi apagada de `oficina-mecanica-app` neste Pull Request,
+e a pipeline passou a publicar a aplicação diretamente no cluster já provisionado por aquele
+repositório.

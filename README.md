@@ -18,8 +18,7 @@ desenvolvido como **Tech Challenge da pós-graduação em Arquitetura de Softwar
 - [Sobre o Projeto](#sobre-o-projeto)
 - [Arquitetura e Desenhos da Solução](#arquitetura-e-desenhos-da-solução)
 - [Execução Local (Docker Compose)](#execução-local-docker-compose)
-- [Deploy em Kubernetes](#deploy-em-kubernetes)
-- [Provisionamento da Infraestrutura (Terraform)](#provisionamento-da-infraestrutura-terraform)
+- [Deploy na Nuvem (AWS)](#deploy-na-nuvem-aws)
 - [CI/CD](#cicd)
 - [Autenticação](#autenticação)
 - [Observabilidade (OpenTelemetry)](#observabilidade-opentelemetry)
@@ -59,8 +58,8 @@ infraestrutura escalável e automatizada.
 | **Conteinerização** | `Dockerfile` multi-stage + `docker-compose` para dev local |
 | **Orquestração** em Kubernetes | Deployments, Services, ConfigMap, Secret e **HPA** em [`k8s/`](k8s/) |
 | **Escalabilidade automática** | HorizontalPodAutoscaler por CPU (min 1 / max 5) |
-| **Infraestrutura como Código** | Módulo **Terraform** em [`infra/`](infra/) provisiona cluster + banco + app |
-| **CI/CD** | Pipeline GitHub Actions: build → teste → imagem → deploy → smoke test |
+| **Infraestrutura como Código** | Terraform em três repositórios dedicados — cluster/rede/ECR ([`oficina-mecanica-infra-k8s`](https://github.com/gabrielMauad/oficina-mecanica-infra-k8s)), banco ([`oficina-mecanica-infra-db`](https://github.com/gabrielMauad/oficina-mecanica-infra-db)) e a Function ([`oficina-mecanica-lambda-auth`](https://github.com/gabrielMauad/oficina-mecanica-lambda-auth)) |
+| **CI/CD** | Pipeline GitHub Actions: build → teste → imagem (ECR) → deploy no EKS → smoke test |
 
 > Detalhes das decisões de Clean Architecture em
 > [`docs/arquitetura/clean-architecture.md`](docs/arquitetura/clean-architecture.md) e das mudanças
@@ -88,7 +87,7 @@ Os três desenhos exigidos na Fase 2 estão em [`docs/arquitetura/diagramas/`](d
 | Desenho | Arquivo |
 |---|---|
 | 🧩 **Componentes da aplicação** (C4 níveis 1–3) | [`diagramas/componentes.md`](docs/arquitetura/diagramas/componentes.md) |
-| 🏗️ **Infraestrutura provisionada** (cluster kind, banco, API, HPA) | [`diagramas/infraestrutura.md`](docs/arquitetura/diagramas/infraestrutura.md) |
+| 🏗️ **Infraestrutura provisionada** (EKS, RDS, API Gateway, HPA) | [`diagramas/infraestrutura.md`](docs/arquitetura/diagramas/infraestrutura.md) |
 | 🚀 **Fluxo de deploy** (CI/CD) | [`diagramas/fluxo-deploy.md`](docs/arquitetura/diagramas/fluxo-deploy.md) |
 
 ### Modular Monolith + Clean Architecture
@@ -156,67 +155,82 @@ As **migrations são aplicadas automaticamente** na inicialização da API (`Mig
 
 ---
 
-## Deploy em Kubernetes
+## Deploy na Nuvem (AWS)
 
-Os manifestos estão em [`k8s/`](k8s/), organizados em `base/` (namespace, ConfigMap, Secret),
-`database/` (PVC, Deployment e Service do PostgreSQL) e `app/` (Deployment, Service NodePort e
-**HPA** da API). O deploy é feito de forma **declarativa via Terraform** (que aplica esses
-manifestos como _resources_) — ver a seção seguinte.
+A partir da Fase 3, a aplicação roda em **nuvem** (AWS Academy Learner Lab) — ver
+[RFC-002](docs/arquitetura/rfcs/002-escolha-do-provedor-de-nuvem.md) para a escolha do provedor e
+as restrições reais da conta, e
+[ADR-005](docs/arquitetura/adrs/005-quatro-repositorios-e-estrategia-de-branches.md) para a
+divisão em quatro repositórios. O cluster **kind** local da Fase 2 (pasta `infra/`, Terraform do
+cluster efêmero criado dentro do runner) foi **removido** deste repositório — a infraestrutura
+agora é persistente e gerenciada pelos repositórios de infra.
 
-Recursos-chave do cluster:
+### Os quatro repositórios e a ordem de deploy
 
-- **Cluster local:** [kind](https://kind.sigs.k8s.io/) (Kubernetes in Docker), namespace
-  `oficina-mecanica`.
-- **HPA:** `oficina-api-hpa` escala a API de **1 a 5 réplicas** ao ultrapassar **50% de CPU**
-  (depende do metrics-server, provisionado junto).
-- **Acesso:** `http://localhost:30080` (NodePort) ou
-  `kubectl port-forward -n oficina-mecanica svc/oficina-api 8080:8080`.
+O merge de cada repositório de infraestrutura dispara `apply` automático — a ordem importa porque
+há dependência real entre eles (outputs consumidos via `terraform_remote_state`, ECR/segredo
+consumidos pela pipeline deste repositório, tabelas consumidas pela Lambda):
 
-Comandos úteis após o deploy:
+| Ordem | Repositório | Provisiona |
+|---|---|---|
+| 1 | [`oficina-mecanica-infra-k8s`](https://github.com/gabrielMauad/oficina-mecanica-infra-k8s) | Cluster **EKS**, NLB, **API Gateway**, **ECR**, segredo da aplicação |
+| 2 | [`oficina-mecanica-infra-db`](https://github.com/gabrielMauad/oficina-mecanica-infra-db) | **RDS PostgreSQL**, segredo do banco |
+| 3 | **Este repositório** (`oficina-mecanica-app`) | Imagem da API (publicada no ECR) + manifestos deste `k8s/` no cluster |
+| 4 | [`oficina-mecanica-lambda-auth`](https://github.com/gabrielMauad/oficina-mecanica-lambda-auth) | Function de autenticação por CPF + rota no API Gateway |
 
-```bash
-kubectl get pods,svc,hpa -n oficina-mecanica
-kubectl top pods -n oficina-mecanica          # métricas (metrics-server)
-kubectl get hpa -n oficina-mecanica -w        # acompanhar a escalabilidade
-```
+Este repositório precisa do ECR e do segredo criados por `infra-k8s` antes de poder publicar a
+imagem e criar o `Secret` do Kubernetes; a Lambda precisa das tabelas criadas pelas **migrations
+desta aplicação** para o fluxo completo de login por CPF funcionar de ponta a ponta.
 
-> Desenho do cluster: [`diagramas/infraestrutura.md`](docs/arquitetura/diagramas/infraestrutura.md).
+### Manifestos (`k8s/`)
 
----
+- **`base/`** — namespace e `ConfigMap` (variáveis não sensíveis). O `Secret` (`oficina-secrets`)
+  **não é commitado**: é criado pela pipeline (`ci-cd.yml`) a partir dos segredos do AWS Secrets
+  Manager, em tempo de deploy — nunca em texto plano no repositório.
+- **`app/`** — `Deployment` (imagem publicada no ECR), `Service` **NodePort** (porta 30080, alvo
+  fixo da NLB interna provisionada por `oficina-mecanica-infra-k8s` — não altere o tipo nem a
+  porta) e **HPA** (1 a 5 réplicas, 50% CPU).
 
-## Provisionamento da Infraestrutura (Terraform)
+Não existe mais `k8s/database/`: o PostgreSQL em pod da Fase 2 foi substituído pelo RDS gerenciado
+(`oficina-mecanica-infra-db`); por isso o `Deployment` da API também não tem mais o initContainer
+`wait-for-postgres` (esperava um Service que deixou de existir).
 
-O módulo em [`infra/`](infra/) provisiona **tudo** de forma declarativa — cluster kind,
-metrics-server (via Helm) e todos os manifestos do `k8s/` — usando _resources_ Terraform de
-verdade (`kind_cluster`, `helm_release`, `kubectl_manifest`), **sem `local-exec`**.
+### Descobrir a URL pública da API
 
-**Pré-requisitos:** Docker, Terraform ≥ 1.5, `kind` e `kubectl` no PATH.
-
-```bash
-cd infra
-terraform init
-
-# 1. cria só o cluster kind primeiro
-terraform apply -auto-approve -target=kind_cluster.this
-
-# 2. builda a imagem (da raiz do repo) e carrega no cluster
-cd ..
-docker build -f src/Bootstrap/Api/Dockerfile -t oficina-mecanica-api:local .
-kind load docker-image oficina-mecanica-api:local --name oficina-mecanica
-
-# 3. aplica o resto (metrics-server, base, banco, app, HPA)
-cd infra
-terraform apply -auto-approve
-```
-
-Para destruir tudo (remove o cluster kind e todo o conteúdo):
+Nunca fica hardcoded no código ou na documentação — o endpoint muda a cada recriação da
+infraestrutura:
 
 ```bash
-cd infra && terraform destroy -auto-approve
+aws apigatewayv2 get-apis \
+  --query "Items[?Name=='oficina-mecanica-api'].ApiEndpoint | [0]" \
+  --output text
 ```
 
-> 📖 Passo a passo completo (local e CI), tabela de recursos e troubleshooting em
-> [`infra/README.md`](infra/README.md).
+`<endpoint>/scalar` é a documentação interativa publicada; `<endpoint>/healthz/ready` é o alvo do
+smoke test da pipeline; `<endpoint>/auth/cpf` é a rota de autenticação por CPF (Function
+Serverless, repositório `oficina-mecanica-lambda-auth`).
+
+### Recuperar a senha do admin da oficina
+
+Gerada pelo Terraform de `oficina-mecanica-infra-k8s` (`random_password`) e nunca commitada:
+
+```bash
+aws secretsmanager get-secret-value \
+  --secret-id oficina-mecanica/dev/app \
+  --query SecretString --output text | jq -r .admin_senha
+```
+
+### Limitação do deploy automático (ADR-006)
+
+A conta AWS Academy Learner Lab não permite criar IAM role nem provedor OIDC — as pipelines dos
+quatro repositórios autenticam com **credenciais de sessão temporárias**
+(`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_SESSION_TOKEN`), renovadas manualmente a cada
+sessão do laboratório (ver
+[ADR-006](docs/arquitetura/adrs/006-credenciais-de-nuvem-no-cicd.md)). **Se o job `deploy` falhar
+na autenticação, não é pipeline quebrada** — é a sessão expirada; renove os três secrets do
+repositório e reexecute via `workflow_dispatch`, sem precisar de um commit novo.
+
+> Desenho da infraestrutura completa: [`diagramas/infraestrutura.md`](docs/arquitetura/diagramas/infraestrutura.md).
 
 ---
 
@@ -227,10 +241,14 @@ Dois workflows do GitHub Actions:
 | Workflow | Gatilho | O que faz |
 |---|---|---|
 | [`ci.yml`](.github/workflows/ci.yml) | Pull Request → `main` | build + testes (validação de PR) |
-| [`ci-cd.yml`](.github/workflows/ci-cd.yml) | Push/merge → `main` | build → teste → imagem (Docker Hub) → **deploy em cluster kind efêmero** → smoke test em `/healthz` → destroy |
+| [`ci-cd.yml`](.github/workflows/ci-cd.yml) | Push/merge → `main`, `workflow_dispatch` | build → teste → imagem (**Amazon ECR**) → deploy no cluster **EKS** (`oficina-mecanica`) → smoke test em `/healthz/ready` via **API Gateway** |
 
-O cluster kind é criado **dentro do runner** GitHub-hosted, então o histórico do Actions é
-autocontido. Segredos necessários: `DOCKERHUB_USERNAME` e `DOCKERHUB_TOKEN`.
+Credenciais: `aws-actions/configure-aws-credentials`, com as **três credenciais de sessão
+temporárias** da conta AWS Academy (`AWS_SESSION_TOKEN` incluído — ver
+[ADR-006](docs/arquitetura/adrs/006-credenciais-de-nuvem-no-cicd.md)). `workflow_dispatch` permite
+reexecutar o deploy depois de renovar as credenciais, sem precisar de um commit novo. O
+`Secret` do Kubernetes (`oficina-secrets`) é criado pela própria pipeline a partir dos segredos do
+Secrets Manager — nenhum valor sensível é impresso no log (`::add-mask::` em cada um).
 
 > Desenho do pipeline: [`diagramas/fluxo-deploy.md`](docs/arquitetura/diagramas/fluxo-deploy.md).
 
@@ -257,14 +275,16 @@ curl -s -X POST http://localhost:8080/api/v1/auth/login \
   -d '{"email": "admin@oficina.com", "senha": "admin123"}'
 ```
 
-**Token do cliente** — a Function Serverless que o emite **ainda não existe** (será entregue em
-repositório próprio, ver [ADR-005](docs/arquitetura/adrs/005-quatro-repositorios-e-estrategia-de-branches.md)).
-Até lá, esse token só é obtido manualmente: assinando um JWT em HS256 com o mesmo
-`Jwt__Secret` da aplicação, com `iss=oficina-mecanica-auth`, `aud=oficina-mecanica-api`,
-`sub=<id do cliente>` e `role=Cliente`. É exatamente o que o helper
-`CreateClienteAuthenticatedClient(clienteId)` faz nos testes de integração
+**Token do cliente** — emitido pela Function Serverless em repositório próprio
+([`oficina-mecanica-lambda-auth`](https://github.com/gabrielMauad/oficina-mecanica-lambda-auth),
+ver [ADR-005](docs/arquitetura/adrs/005-quatro-repositorios-e-estrategia-de-branches.md)), na
+nuvem via `POST <url-da-api>/auth/cpf` — não existe rota nesta aplicação que emita token de
+cliente. Localmente (`docker compose`, sem a Lambda rodando), esse token só é obtido manualmente:
+assinando um JWT em HS256 com o mesmo `Jwt__Secret` da aplicação, com
+`iss=oficina-mecanica-auth`, `aud=oficina-mecanica-api`, `sub=<id do cliente>` e `role=Cliente`. É
+exatamente o que o helper `CreateClienteAuthenticatedClient(clienteId)` faz nos testes de
+integração
 ([`OficinaMecanicaWebApplicationFactory`](tests/IntegrationTests/Infrastructure/OficinaMecanicaWebApplicationFactory.cs)).
-**Não existe rota nesta aplicação que emita token de cliente.**
 
 Ambos os tokens têm validade de **1 hora** e são enviados como `Authorization: Bearer <token>`
 (ou pelo botão **Authorize** no Scalar). O contrato de claims está no
@@ -296,9 +316,10 @@ recebe **403 Forbidden**, não 404.
 > A documentação OpenAPI/Scalar continua acessível **sem autenticação** — decisão consciente,
 > registrada no [RFC-001 §8](docs/arquitetura/rfcs/001-estrategia-de-autenticacao.md).
 
-> Credenciais e segredo JWT são definidos no `docker-compose.yml` (dev) e na Secret do Kubernetes
-> (cluster). Em produção, substitua `Jwt__Secret`, `Auth__AdminEmail` e `Auth__AdminSenha`. O
-> emissor e a audience aceitos vêm de `Jwt__ValidIssuers__0` / `__1` e `Jwt__Audience`.
+> Credenciais e segredo JWT são definidos no `docker-compose.yml` (dev) e no `Secret`
+> `oficina-secrets` do Kubernetes (nuvem — criado pela pipeline a partir do secret
+> `oficina-mecanica/dev/app` do Secrets Manager, ver [Deploy na Nuvem (AWS)](#deploy-na-nuvem-aws)).
+> O emissor e a audience aceitos vêm de `Jwt__ValidIssuers__0` / `__1` e `Jwt__Audience`.
 
 ---
 
@@ -370,12 +391,13 @@ docker compose up --build
   (`TraceJsonConsoleFormatter`, ADR-004) — o mesmo `trace_id` visto no log aparece na busca por
   Trace ID do Jaeger, fechando a correlação log → trace.
 
-Em Kubernetes, a mesma variável é propagada via
-[`ConfigMap`](k8s/base/01-configmap.yaml) (`OTEL_EXPORTER_OTLP_ENDPOINT`) — hoje apontando para um
-coletor hipotético no cluster (`otel-collector`); quando a ferramenta de APM (New Relic/Datadog)
-for escolhida, basta trocar esse valor (e, se precisar de chave de API, adicioná-la como
-`OTEL_EXPORTER_OTLP_HEADERS` no [`Secret`](k8s/base/02-secret.yaml) — nunca em texto plano no
-ConfigMap).
+Em Kubernetes, `OTEL_EXPORTER_OTLP_ENDPOINT` **não está definido hoje** no
+[`ConfigMap`](k8s/base/01-configmap.yaml) — o Service `otel-collector` hipotético nunca existiu no
+cluster, e mantê-lo só gerava erro de exportação em loop nos logs; sem a variável, o SDK cai no
+default `http://localhost:4317` e simplesmente não exporta. Quando a ferramenta de APM (New
+Relic/Datadog, RFC-004) for escolhida, essa chave volta ao `ConfigMap` apontando para o destino
+real (e, se precisar de chave de API, ela vai como `OTEL_EXPORTER_OTLP_HEADERS` no `Secret`
+`oficina-secrets` — nunca em texto plano no ConfigMap).
 
 ---
 
@@ -383,7 +405,7 @@ ConfigMap).
 
 | Recurso | Onde |
 |---|---|
-| **Documentação interativa (Scalar/OpenAPI)** | `docker compose up`: `http://localhost:8080/scalar` (e `/openapi`) — cluster kind (`k8s`/Terraform): `http://localhost:30080/scalar` (NodePort) ou via `kubectl port-forward -n oficina-mecanica svc/oficina-api 8080:8080` |
+| **Documentação interativa (Scalar/OpenAPI)** | `docker compose up`: `http://localhost:8080/scalar` (e `/openapi`) — nuvem: `<url-da-api>/scalar`, onde `<url-da-api>` é descoberta com o comando em [Deploy na Nuvem (AWS)](#deploy-na-nuvem-aws) |
 | **Collection completa (Bruno)** | [`docs/guias/collection_bruno.yml`](docs/guias/collection_bruno.yml) — importável no [Bruno](https://usebruno.com), ambiente `Local` pré-configurado |
 
 A collection Bruno inclui todos os módulos e endpoints. Ela usa **duas variáveis de token** no
@@ -472,7 +494,9 @@ O vídeo (≤ 15 min, público ou não listado) demonstra:
 | Arquitetura, diagramas e decisões | [`docs/arquitetura/`](docs/arquitetura/) |
 | Planos de implementação e infra | [`docs/planos/`](docs/planos/) |
 | Guias de teste e collection | [`docs/guias/`](docs/guias/) |
-| Recursos Terraform (passo a passo) | [`infra/README.md`](infra/README.md) |
+| Terraform do cluster/rede/ECR (passo a passo) | [`oficina-mecanica-infra-k8s`](https://github.com/gabrielMauad/oficina-mecanica-infra-k8s) |
+| Terraform do banco gerenciado (passo a passo) | [`oficina-mecanica-infra-db`](https://github.com/gabrielMauad/oficina-mecanica-infra-db) |
+| Terraform e pipeline da Function Serverless | [`oficina-mecanica-lambda-auth`](https://github.com/gabrielMauad/oficina-mecanica-lambda-auth) |
 | Enunciados oficiais (FIAP) | [`docs/spec/`](docs/spec/) |
 
 ---

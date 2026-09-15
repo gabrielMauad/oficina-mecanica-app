@@ -1,24 +1,21 @@
 # Desenho — Infraestrutura
 
-> Existem **dois ambientes** neste projeto: o **local de desenvolvimento**, que é o que roda hoje
-> (kind + `docker compose`), e o **alvo em nuvem**, exigido pela Fase 3 e ainda não provisionado.
-> Este documento descreve os dois, deixando explícito qual é qual — um diagrama que apresenta
-> infraestrutura de nuvem inexistente como se estivesse pronta é pior do que nenhum diagrama.
+> Existem **dois ambientes** neste projeto: o **local de desenvolvimento** (`docker compose`, sem
+> Kubernetes) e o **de produção, na nuvem** — AWS Academy Learner Lab, exigido pela Fase 3.
+> O cluster **kind** local usado na Fase 2 (e na pipeline de CI/CD daquela fase) foi removido: a
+> infraestrutura de nuvem é persistente e gerenciada pelos repositórios de infra, não recriada a
+> cada execução do CI.
 >
 > Diagramas em [Mermaid](https://mermaid.js.org/) — renderizam nativamente no GitHub.
 
 ---
 
-## Ambiente local de desenvolvimento (o que funciona hoje)
+## Ambiente local de desenvolvimento
 
-Duas formas de rodar o projeto localmente, para propósitos diferentes:
-
-- **`docker compose up`** — dia a dia de desenvolvimento. Sobe `postgres`, `api` e `jaeger`
-  (coletor OTLP + UI, ver [Observabilidade no README](../../../README.md#observabilidade-opentelemetry)).
-  Sem Kubernetes.
-- **Cluster kind** — validação de Kubernetes e o que roda na pipeline de CI/CD hoje
-  (`ci-cd.yml`: builda a imagem, sobe um kind efêmero no runner, aplica os manifestos via
-  Terraform, roda smoke test, destrói o cluster).
+Uma única forma de rodar o projeto localmente: **`docker compose up`**, para desenvolvimento e
+testes manuais do dia a dia. Sobe `postgres`, `api` e `jaeger` (coletor OTLP + UI, ver
+[Observabilidade no README](../../../README.md#observabilidade-opentelemetry)). Sem Kubernetes —
+a validação de manifestos Kubernetes acontece hoje contra o cluster de nuvem, não localmente.
 
 ```mermaid
 flowchart TB
@@ -33,147 +30,97 @@ flowchart TB
         apiC -.->|"OTLP gRPC :4317"| jaeger
     end
 
-    subgraph kind["cluster kind (CI/CD e validação de k8s)"]
-        direction TB
-        ns["namespace oficina-mecanica"]
-        apiK["Deployment api<br/>+ HPA 1-5 @ 50% CPU"]
-        pgK[("Deployment postgres<br/>+ PVC")]
-        cm["ConfigMap"]
-        sec["Secret"]
-        apiK -->|"EF Core / Npgsql"| pgK
-        cm -.-> apiK
-        sec -.-> apiK
-        ns --> apiK
-        ns --> pgK
-    end
-
     dev -->|"docker compose up"| compose
-    dev -->|"terraform apply (infra/)"| kind
 
     classDef existente fill:#1168bd,stroke:#0b4884,color:#fff
-    class apiC,pgC,jaeger,apiK,pgK,cm,sec,ns existente
+    class apiC,pgC,jaeger existente
 ```
 
-**Recursos provisionados pelo Terraform (`infra/`) no cluster kind:**
-
-| Recurso Terraform | Tipo | O que cria |
-|---|---|---|
-| `kind_cluster.this` | `kind_cluster` | Cluster kind com NodePort 30080 mapeado para `localhost:30080` |
-| `helm_release.metrics_server` | `helm_release` | metrics-server em `kube-system` (habilita o HPA) |
-| `kubectl_manifest.namespace` | `kubectl_manifest` | Namespace `oficina-mecanica` |
-| `kubectl_manifest.configmap` | `kubectl_manifest` | ConfigMap com variáveis **não** sensíveis |
-| `kubectl_manifest.secret` | `kubectl_manifest` | Secret com credenciais do banco/JWT |
-| `kubectl_manifest.postgres_pvc` | `kubectl_manifest` | PersistentVolumeClaim do PostgreSQL |
-| `kubectl_manifest.postgres_deployment` | `kubectl_manifest` | Deployment do PostgreSQL 16 |
-| `kubectl_manifest.postgres_service` | `kubectl_manifest` | Service ClusterIP do PostgreSQL |
-| `kubectl_manifest.api_deployment` | `kubectl_manifest` | Deployment da API (imagem via `var.api_image`) |
-| `kubectl_manifest.api_service` | `kubectl_manifest` | Service NodePort 30080 da API |
-| `kubectl_manifest.api_hpa` | `kubectl_manifest` | HorizontalPodAutoscaler da API |
-
-**Pontos de projeto que sustentam o desenho:**
-
-- **HPA por CPU (50%)**, `min 1 / max 5`. Depende do `resources.requests.cpu` no container da
-  API e do metrics-server — ambos presentes.
-- **initContainer `wait-for-postgres`**: a API roda `MigrateAsync` no startup e falha se o banco
-  não estiver pronto; o initContainer evita `CrashLoopBackOff`.
-- **Credenciais consistentes**: `POSTGRES_USER/PASSWORD` do banco e `ConnectionStrings__Default`
-  da API saem da **mesma** Secret.
-- **Imagem no cluster**: local via `kind load docker-image` · CI via Docker Hub público
-  (`imagePullPolicy: IfNotPresent`).
-- Todo o cluster kind é provisionado **100% por Terraform** (`kind_cluster`, `helm_release`,
-  `kubectl_manifest`, sem `local-exec`), com `terraform.tfstate` local. O banco PostgreSQL roda
-  **dentro do cluster** — decisão adequada a um cluster efêmero, mas que muda no ambiente alvo
-  (ver abaixo).
-
-> Escalabilidade automática demonstrada por teste de carga (o HPA sobe as réplicas da API).
-> Detalhes de decisão em [`../../planos/infra-fase-2/00-visao-geral.md`](../../planos/infra-fase-2/00-visao-geral.md);
-> passo a passo em [`../../../infra/README.md`](../../../infra/README.md);
-> pipeline em [`fluxo-deploy.md`](fluxo-deploy.md).
+> Detalhes de decisão do cluster kind removido (Fase 2) em
+> [`../../planos/infra-fase-2/00-visao-geral.md`](../../planos/infra-fase-2/00-visao-geral.md) —
+> documento histórico, mantido como registro do que existiu, não como estado atual.
 
 ---
 
-## Ambiente alvo: nuvem (Fase 3 — ainda não provisionado)
+## Ambiente de produção: nuvem (AWS Academy Learner Lab)
 
 A Fase 3 exige infraestrutura de nuvem de verdade: API Gateway, Function Serverless, banco de
 dados gerenciado, cluster Kubernetes gerenciado com escalabilidade e tudo provisionado por
-Terraform — ver
-[`docs/planos/fase-3/00-analise-da-spec.md`](../../planos/fase-3/00-analise-da-spec.md), seção
-3.1, para a lista completa de recursos previstos.
-
-**Nada abaixo está provisionado hoje.** Não existe Terraform de nuvem, não existe cluster
-gerenciado, não existe banco gerenciado e não existe API Gateway. O diagrama descreve o alvo, não
-o estado atual.
-
-**Sobre o provedor:** o desenho usa AWS como rótulo porque é a **hipótese de trabalho** dos
-planos da fase — a decisão formal de provedor é do **RFC-002**, ainda pendente. Se o RFC decidir
-por outra nuvem, os nomes de serviço mudam, mas as peças (gateway, função serverless, banco
-gerenciado, cluster gerenciado, Terraform, APM) permanecem as mesmas.
+Terraform — decisão de provedor em [RFC-002](../rfcs/002-escolha-do-provedor-de-nuvem.md)
+(**AWS**, conta AWS Academy Learner Lab).
 
 ```mermaid
 flowchart TB
     ator["Atendente / Cliente"]
 
-    subgraph aws["Nuvem (hipótese: AWS — RFC-002 pendente)"]
+    subgraph aws["AWS Academy Learner Lab — us-east-1"]
         direction TB
-        gw["API Gateway<br/>roteamento e controle de acesso"]
+        gw["API Gateway (HTTP API)<br/>roteamento e controle de acesso"]
 
-        subgraph vpc["VPC default da conta (subnets públicas, sem VPC própria)"]
+        subgraph vpc["VPC default da conta (subnets publicas, sem NAT Gateway)"]
             direction TB
-            authFn["Function Serverless de autenticação<br/>oficina-mecanica-lambda-auth"]
+            authFn["Function Serverless de autenticacao<br/>oficina-mecanica-lambda-auth"]
 
-            subgraph eks["Cluster Kubernetes gerenciado<br/>(ex.: EKS + node group com autoscaling)"]
+            subgraph eks["Cluster EKS (oficina-mecanica)<br/>node group t3.small, 2-3 nos"]
                 direction TB
-                api["Aplicação .NET 10<br/>oficina-mecanica-app"]
+                api["Aplicacao .NET 10<br/>oficina-mecanica-app<br/>HPA 1-5 @ 50% CPU"]
             end
 
-            rds[("Banco de dados gerenciado<br/>ex.: RDS PostgreSQL<br/>oficina-mecanica-infra-db")]
+            nlb["NLB interna<br/>target group: NodePort 30080"]
+            rds[("RDS PostgreSQL 16<br/>oficina-mecanica-infra-db<br/>db.t3.micro, single-AZ")]
         end
 
-        secrets["Secrets Manager / SSM<br/>segredo JWT, credenciais do banco"]
-        apm["Ferramenta de APM<br/>Datadog ou New Relic — escolha pendente"]
-        cw["Logs (ex.: CloudWatch)"]
+        secrets["Secrets Manager<br/>segredo do RDS + segredo da aplicacao (JWT/admin)"]
+        ecr["Amazon ECR<br/>oficina-mecanica-api"]
+        apm["Ferramenta de APM<br/>Datadog ou New Relic - escolha pendente (RFC-004)"]
     end
 
     ator -->|"HTTPS/JSON"| gw
-    gw -->|"rota pública /auth"| authFn
-    gw -->|"rotas protegidas, valida JWT"| api
+    gw -->|"POST /auth/cpf"| authFn
+    gw -->|"demais rotas, via VPC Link"| nlb
+    nlb -->|"NodePort 30080"| api
     authFn -->|"consulta cadastro.cliente (somente leitura)"| rds
     api -->|"EF Core / Npgsql, SSL"| rds
-    authFn -.->|"lê segredo"| secrets
-    api -.->|"lê segredo"| secrets
-    api -.->|"OTLP: traces + métricas"| apm
-    authFn -.->|"logs"| cw
-    cw -.->|"forwarder/agente"| apm
+    authFn -.->|"le segredos no apply (Terraform)"| secrets
+    api -.->|"le segredos no deploy (pipeline)"| secrets
+    ecr -.->|"imagem publicada"| api
+    api -.->|"OTLP: traces + metricas"| apm
 
-    classDef alvo fill:#ffffff,stroke:#999999,color:#555555,stroke-dasharray: 5 5
+    classDef existente fill:#1168bd,stroke:#0b4884,color:#fff
     class ator fill:#08427b,stroke:#052e56,color:#fff
-    class gw,vpc,eks,api,rds,secrets,apm,cw,authFn,aws alvo
+    class gw,vpc,eks,api,rds,secrets,ecr,authFn,nlb,aws existente
+    classDef pendente fill:#ffffff,stroke:#999999,color:#555555,stroke-dasharray: 5 5
+    class apm pendente
 ```
 
-**Legenda:** todas as caixas do ambiente de nuvem estão com borda tracejada porque **nada delas
-está provisionado** — nem mesmo `api` e `authFn`, que já têm código pronto em seus repositórios
-(ver a seção "Nível 4 — Implantação em Nuvem" em [`componentes.md`](componentes.md)), mas ainda
-não rodam em nenhuma nuvem: rodam hoje no ambiente local descrito acima.
+**Legenda:** só a caixa do APM (`apm`) está com borda tracejada — a ferramenta ainda não foi
+escolhida (RFC-004). Todo o resto do diagrama está **provisionado**: cluster EKS, NLB, API
+Gateway, ECR e o segredo da aplicação nascem em `oficina-mecanica-infra-k8s`; o RDS e seu segredo
+em `oficina-mecanica-infra-db`; a Function e sua rota no API Gateway em
+`oficina-mecanica-lambda-auth`; a imagem e os manifestos da API neste repositório
+(`oficina-mecanica-app`).
 
 **Topologia de repositórios** (ver
-[ADR-005](../adrs/005-quatro-repositorios-e-estrategia-de-branches.md)): o Terraform deste alvo
-se divide em dois repositórios — `oficina-mecanica-infra-k8s` (cluster + node groups + API
-Gateway) e `oficina-mecanica-infra-db` (banco gerenciado) — que publicam outputs (endpoint do
-banco, nome do cluster) consumidos pelos repositórios `oficina-mecanica-lambda-auth` e
-`oficina-mecanica-app` via estado remoto. Nenhum dos dois cria VPC própria: ambos usam a VPC
-default da conta AWS Academy Learner Lab via `data` sources — ver
+[ADR-005](../adrs/005-quatro-repositorios-e-estrategia-de-branches.md)): o Terraform deste
+ambiente se divide em três repositórios — `oficina-mecanica-infra-k8s` (cluster, rede, NLB, API
+Gateway, ECR e segredo da aplicação), `oficina-mecanica-infra-db` (banco gerenciado e seu segredo)
+e `oficina-mecanica-lambda-auth` (a Function, seu security group e sua rota no API Gateway) — que
+publicam outputs (endpoint do banco, nome do cluster, id da API, security groups) consumidos entre
+si e por `oficina-mecanica-app` via estado remoto (`terraform_remote_state`). Nenhum deles cria
+VPC própria: todos usam a VPC default da conta AWS Academy Learner Lab via `data` sources — ver
 [RFC-002](../rfcs/002-escolha-do-provedor-de-nuvem.md) ("Atualização — VPC default").
 
-**Diferenças concretas em relação ao ambiente local:**
+**Diferenças em relação ao ambiente local:**
 
-| Peça | Hoje (local) | Alvo (nuvem) |
+| Peça | Local (`docker compose`) | Nuvem (produção) |
 |---|---|---|
-| Cluster Kubernetes | kind, efêmero, um nó | Gerenciado, com autoscaling de nós |
-| Banco de dados | PostgreSQL em pod, PVC local | Serviço gerenciado (ex.: RDS), fora do cluster |
-| Entrada de tráfego | NodePort direto | API Gateway com roteamento e controle de acesso |
-| Segredos | `Secret` do Kubernetes, commitado em `k8s/base/02-secret.yaml` | Secrets Manager/SSM, injetado no cluster |
-| Telemetria (destino) | Jaeger local (`docker compose`) | Ferramenta de APM (Datadog ou New Relic — escolha pendente) |
-| Terraform | State local, provisiona kind | State remoto (S3 + lock), provisiona recursos de nuvem |
+| Cluster Kubernetes | Nenhum (a API roda direto em contêiner) | **EKS**, gerenciado, com node group escalável |
+| Banco de dados | PostgreSQL em contêiner, volume Docker | **RDS PostgreSQL 16**, gerenciado, fora do cluster |
+| Entrada de tráfego | Porta exposta direto no host (`8080`) | **API Gateway** com roteamento e controle de acesso, via NLB interna |
+| Autenticação por CPF | Assinatura manual de JWT (sem Function rodando) | **Function Serverless** real, atrás do API Gateway |
+| Segredos | Variáveis de ambiente do `docker-compose.yml` | **Secrets Manager**, resolvidos no apply/deploy — nunca commitados |
+| Telemetria (destino) | Jaeger local (`docker compose`) | Ferramenta de APM (Datadog ou New Relic — escolha pendente, RFC-004) |
+| Terraform | Não se aplica | State remoto (S3), um repositório por peça de infraestrutura |
 
 A aplicação já exporta OTLP e já expõe health checks — isso **não muda** entre os dois ambientes,
 só o destino do OTLP e o que está por trás do Kubernetes muda. Ver

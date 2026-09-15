@@ -16,16 +16,6 @@ spec:
       labels:
         app: oficina-api
     spec:
-      initContainers:
-        - name: wait-for-postgres
-          image: busybox:1.36
-          command:
-            - sh
-            - -c
-            - |
-              echo "aguardando o postgres em oficina-postgres:5432..."
-              until nc -z oficina-postgres 5432; do sleep 2; done
-              echo "postgres disponivel."
       containers:
         - name: api
           image: IMAGE_PLACEHOLDER        
