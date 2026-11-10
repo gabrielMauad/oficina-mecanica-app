@@ -14,7 +14,7 @@ namespace IntegrationTests.HealthChecks;
 /// </summary>
 public sealed class HealthCheckReadinessDegradedTests : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _db = new PostgreSqlBuilder()
+    private readonly PostgreSqlContainer _db = new PostgreSqlBuilder("postgres:15.1")
         .WithDatabase("ordens_servico")
         .WithUsername("postgres")
         .WithPassword("postgres")

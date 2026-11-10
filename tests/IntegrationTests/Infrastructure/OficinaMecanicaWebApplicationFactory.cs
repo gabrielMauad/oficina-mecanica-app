@@ -28,7 +28,7 @@ namespace IntegrationTests.Infrastructure;
 public sealed class OficinaMecanicaWebApplicationFactory
     : WebApplicationFactory<Program>, IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _db = new PostgreSqlBuilder()
+    private readonly PostgreSqlContainer _db = new PostgreSqlBuilder("postgres:15.1")
         .WithDatabase("ordens_servico")
         .WithUsername("postgres")
         .WithPassword("postgres")
