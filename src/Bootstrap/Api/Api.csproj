@@ -20,12 +20,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\Modules\Autenticacao\Autenticacao.Infrastructure\Autenticacao.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\Modules\Autenticacao\Autenticacao.Web\Autenticacao.Web.csproj" />
-    <ProjectReference Include="..\..\Modules\Cadastro\Cadastro.Infrastructure\Cadastro.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\Modules\Cadastro\Cadastro.Web\Cadastro.Web.csproj" />
-    <ProjectReference Include="..\..\Modules\PecasInsumos\PecasInsumos.Infrastructure\PecasInsumos.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\Modules\PecasInsumos\PecasInsumos.Web\PecasInsumos.Web.csproj" />
     <ProjectReference Include="..\..\Modules\OrdensServico\OrdensServico.Infrastructure\OrdensServico.Infrastructure.csproj" />
     <ProjectReference Include="..\..\Modules\OrdensServico\OrdensServico.Web\OrdensServico.Web.csproj" />
     <ProjectReference Include="..\..\SharedKernel\SharedKernel.Application\SharedKernel.Application.csproj" />

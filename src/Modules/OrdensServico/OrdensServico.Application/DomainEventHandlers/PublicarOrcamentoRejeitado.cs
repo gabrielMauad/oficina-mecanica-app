@@ -1,5 +1,5 @@
 ﻿using MediatR;
-using OrdensServico.Contracts.IntegrationEvents;
+using OficinaMecanica.Contracts.IntegrationEvents;
 using OrdensServico.Domain.OrdemServico.Events;
 using SharedKernel.Application;
 

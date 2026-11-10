@@ -1,5 +1,9 @@
 # Sistema de Oficina Mecânica
 
+> **Fase 4:** este repositório passou a ser o serviço **OrdensServico** da arquitetura de microsserviços.
+> Cadastro, PecasInsumos, Autenticação e Pagamento estão em repositórios próprios; a documentação
+> completa desta fase será publicada separadamente. O texto abaixo descreve as fases anteriores.
+
 Back-end de um sistema integrado de atendimento e execução de serviços para oficina mecânica,
 desenvolvido como **Tech Challenge da pós-graduação em Arquitetura de Software (FIAP/SOAT)**.
 

@@ -1,20 +1,12 @@
 using Api.Extensions;
 using Api.Middlewares;
 using Api.OpenApi;
-using Autenticacao.Infrastructure;
-using Autenticacao.Web;
-using Cadastro.Infrastructure;
-using Cadastro.Infrastructure.Persistence;
-using Cadastro.Web;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi;
 using OrdensServico.Infrastructure;
 using OrdensServico.Infrastructure.Persistence;
 using OrdensServico.Web;
-using PecasInsumos.Infrastructure;
-using PecasInsumos.Infrastructure.Persistence;
-using PecasInsumos.Web;
 using SharedKernel.Application;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -60,16 +52,10 @@ builder.Services.AddOpenApi(options =>
 builder.Services.AddApiHealthChecks();
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<CustomExceptionHandler>();
-builder.Services.AddAutenticacaoModule(builder.Configuration);
-builder.Services.AddCadastroModule(builder.Configuration);
 builder.Services.AddSharedKernelServices();
-builder.Services.AddPecasInsumosModule(builder.Configuration);
 builder.Services.AddOrdensServicoModule(builder.Configuration);
 
 builder.Services.AddControllers()
-    .AddApplicationPart(typeof(AutenticacaoAssemblyMarker).Assembly)
-    .AddApplicationPart(typeof(CadastroAssemblyMarker).Assembly)
-    .AddApplicationPart(typeof(PecasInsumosAssemblyMarker).Assembly)
     .AddApplicationPart(typeof(OrdensServicoAssemblyMarker).Assembly);
 
 var app = builder.Build();
@@ -87,14 +73,6 @@ app.MapApiHealthChecks();
 
 using (var scope = app.Services.CreateScope())
 {
-    var cadastroDb = scope.ServiceProvider.GetRequiredService<CadastroDbContext>();
-    if (cadastroDb.Database.IsRelational())
-        await cadastroDb.Database.MigrateAsync();
-
-    var pecasInsumoDb = scope.ServiceProvider.GetRequiredService<PecasInsumosDbContext>();
-    if (pecasInsumoDb.Database.IsRelational())
-        await pecasInsumoDb.Database.MigrateAsync();
-
     var ordensServicoDb = scope.ServiceProvider.GetRequiredService<OrdensServicoDbContext>();
     if (ordensServicoDb.Database.IsRelational())
         await ordensServicoDb.Database.MigrateAsync();

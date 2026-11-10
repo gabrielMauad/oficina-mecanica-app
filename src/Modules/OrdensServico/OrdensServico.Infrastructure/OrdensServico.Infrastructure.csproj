@@ -7,6 +7,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
 	<PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.0" />
 	<PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
 	<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" />
@@ -16,13 +20,14 @@
 		<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 	</PackageReference>
 	<PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="11.11.0" />
+	<PackageReference Include="MassTransit" Version="8.5.12" />
+	<PackageReference Include="MassTransit.AmazonSQS" Version="8.5.12" />
 	<PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.7" />
   </ItemGroup>
-	
+
   <ItemGroup>
+    <ProjectReference Include="..\..\..\Contracts\OficinaMecanica.Contracts\OficinaMecanica.Contracts.csproj" />
     <ProjectReference Include="..\..\..\SharedKernel\SharedKernel.Application\SharedKernel.Application.csproj" />
-    <ProjectReference Include="..\..\Cadastro\Cadastro.Contracts\Cadastro.Contracts.csproj" />
-    <ProjectReference Include="..\..\PecasInsumos\PecasInsumos.Contracts\PecasInsumos.Contracts.csproj" />
     <ProjectReference Include="..\OrdensServico.Adapters\OrdensServico.Adapters.csproj" />
     <ProjectReference Include="..\OrdensServico.Application\OrdensServico.Application.csproj" />
     <ProjectReference Include="..\OrdensServico.Contracts\OrdensServico.Contracts.csproj" />

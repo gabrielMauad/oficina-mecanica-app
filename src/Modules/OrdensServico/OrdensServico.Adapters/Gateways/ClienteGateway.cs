@@ -1,4 +1,4 @@
-using Cadastro.Contracts.Queries;
+using OrdensServico.Adapters.Gateways.Http;
 using OrdensServico.Application.Gateways;
 using OrdensServico.Application.Gateways.Dtos;
 
@@ -6,20 +6,22 @@ namespace OrdensServico.Adapters.Gateways;
 
 public sealed class ClienteGateway : IClienteGateway
 {
-    private readonly ICadastroClienteQuery _cadastroClienteQuery;
+    private readonly HttpClient _httpClient;
 
-    public ClienteGateway(ICadastroClienteQuery cadastroClienteQuery)
-        => _cadastroClienteQuery = cadastroClienteQuery;
+    public ClienteGateway(HttpClient httpClient) => _httpClient = httpClient;
 
     public async Task<bool> ExisteEAtivo(Guid clienteId, CancellationToken ct)
     {
-        var dto = await _cadastroClienteQuery.ObterPorId(clienteId, ct);
-        return dto is { Ativo: true };
+        var cliente = await ObterCliente(clienteId, ct);
+        return cliente is { Ativo: true };
     }
 
     public async Task<ClienteInfo?> ObterInfo(Guid clienteId, CancellationToken ct)
     {
-        var dto = await _cadastroClienteQuery.ObterPorId(clienteId, ct);
-        return dto is null ? null : new ClienteInfo(dto.Nome, dto.Email);
+        var cliente = await ObterCliente(clienteId, ct);
+        return cliente is null ? null : new ClienteInfo(cliente.Nome, cliente.Email);
     }
+
+    private Task<ClienteResposta?> ObterCliente(Guid clienteId, CancellationToken ct) =>
+        _httpClient.ObterOuNuloAsync<ClienteResposta>($"api/v1/clientes/{clienteId}", ct);
 }

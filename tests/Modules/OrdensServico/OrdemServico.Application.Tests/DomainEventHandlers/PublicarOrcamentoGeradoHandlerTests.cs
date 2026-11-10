@@ -1,5 +1,5 @@
 using OrdensServico.Application.DomainEventHandlers;
-using OrdensServico.Contracts.IntegrationEvents;
+using OficinaMecanica.Contracts.IntegrationEvents;
 using OrdensServico.Domain.OrdemServico;
 using OrdensServico.Domain.OrdemServico.Events;
 using SharedKernel.Application;

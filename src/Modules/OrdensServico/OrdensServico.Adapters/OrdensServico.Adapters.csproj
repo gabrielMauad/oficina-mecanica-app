@@ -11,8 +11,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\Cadastro\Cadastro.Contracts\Cadastro.Contracts.csproj" />
-    <ProjectReference Include="..\..\PecasInsumos\PecasInsumos.Contracts\PecasInsumos.Contracts.csproj" />
     <ProjectReference Include="..\OrdensServico.Application\OrdensServico.Application.csproj" />
     <ProjectReference Include="..\OrdensServico.Domain\OrdensServico.Domain.csproj" />
   </ItemGroup>

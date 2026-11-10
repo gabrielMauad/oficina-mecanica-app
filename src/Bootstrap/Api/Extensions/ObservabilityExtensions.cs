@@ -16,6 +16,9 @@ namespace Api.Extensions;
 /// </summary>
 public static class ObservabilityExtensions
 {
+    // Usado quando OTEL_SERVICE_NAME não está definido (00-contratos.md §2).
+    private const string ServiceNamePadrao = "oficina-mecanica-ordens-servico";
+
     // Meters de negócio criados por outra tarefa (em paralelo), registrados aqui apenas pelo
     // nome — não exige referência às classes que os instanciam.
     private static readonly string[] ApplicationMeterNames =
@@ -44,6 +47,7 @@ public static class ObservabilityExtensions
                 .SetSampler(new AlwaysOnSampler())
                 .AddAspNetCoreInstrumentation() // requisições de entrada
                 .AddHttpClientInstrumentation() // chamadas HTTP de saída
+                .AddSource("MassTransit") // spans de publicação/consumo; propaga o traceparent pelas mensagens
                 .AddNpgsql() // comandos SQL executados via Npgsql/EF Core, aninhados no span da requisição
                 .AddOtlpExporter())
             .WithMetrics(metrics => metrics
@@ -70,7 +74,9 @@ public static class ObservabilityExtensions
     /// </summary>
     internal static ResourceBuilder BuildResourceBuilder(WebApplicationBuilder builder) =>
         ResourceBuilder.CreateDefault()
-            .AddService(serviceName: "oficina-mecanica-api", serviceNamespace: "oficina-mecanica")
+            .AddService(
+                serviceName: builder.Configuration["OTEL_SERVICE_NAME"] is { Length: > 0 } nome ? nome : ServiceNamePadrao,
+                serviceNamespace: "oficina-mecanica")
             .AddAttributes(
             [
                 new KeyValuePair<string, object>("deployment.environment", builder.Environment.EnvironmentName)
