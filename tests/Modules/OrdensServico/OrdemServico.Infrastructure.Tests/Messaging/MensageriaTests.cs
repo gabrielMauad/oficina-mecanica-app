@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using OficinaMecanica.Contracts.IntegrationEvents;
 using OrdensServico.Infrastructure.Messaging;
 using SharedKernel.Application;
+using SharedKernel.Domain;
 
 namespace OrdemServico.Infrastructure.Tests.Messaging;
 
@@ -89,5 +90,29 @@ public class MensageriaTests
 
         Assert.True(await harness.Published.Any<OrcamentoRejeitadoIntegrationEvent>());
         Assert.False(await harness.Published.Any<OrcamentoGeradoIntegrationEvent>());
+    }
+
+    [Fact]
+    public async Task Publish_ViaTipoAbstrato_PublicaComOTipoConcretoEmExecucao()
+    {
+        await using var provider = CriarServices(MensageriaOptions.TransporteInMemory)
+            .AddMassTransitTestHarness()
+            .BuildServiceProvider(true);
+        var harness = provider.GetRequiredService<ITestHarness>();
+        await harness.Start();
+
+        IIntegrationEvent evento = new OrcamentoGeradoIntegrationEvent(
+            Guid.NewGuid(), DateTime.UtcNow, Guid.NewGuid(), Guid.NewGuid(),
+            [new ItemPecaEventDto(Guid.NewGuid(), 2)]);
+
+        await using (var scope = provider.CreateAsyncScope())
+            await scope.ServiceProvider.GetRequiredService<IIntegrationEventBus>().Publish(evento);
+
+        Assert.True(await harness.Published.Any<OrcamentoGeradoIntegrationEvent>());
+        var publicado = harness.Published.Select<OrcamentoGeradoIntegrationEvent>().Single();
+        Assert.Equal(evento.EventId, publicado.Context.Message.EventId);
+        Assert.Contains(
+            "urn:message:OficinaMecanica.Contracts.IntegrationEvents:OrcamentoGeradoIntegrationEvent",
+            publicado.Context.SupportedMessageTypes);
     }
 }
