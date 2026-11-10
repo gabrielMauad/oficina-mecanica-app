@@ -1,4 +1,5 @@
-# Dependências compartilhadas entre os serviços da oficina no ambiente local (D19).
+# Dependências compartilhadas entre os serviços da oficina no ambiente local: cada serviço tem o
+# próprio docker-compose.yml, e todos usam a mesma rede, o mesmo LocalStack e o mesmo Jaeger daqui.
 # Cria a rede `oficina-local` e sobe o LocalStack (SQS/SNS/DynamoDB) e o Jaeger (traces).
 # Ordem de uso:
 #   1. docker compose -f docker-compose.infra.yml up -d      (este arquivo, uma vez)

@@ -9,7 +9,8 @@ namespace IntegrationTests.Infrastructure;
 /// <summary>
 /// Faz o papel dos serviços Cadastro e PecasInsumos, que não existem mais no processo da OS:
 /// atende por <see cref="HttpMessageHandler"/> as mesmas rotas e formatos de resposta que os
-/// gateways HTTP consomem (00-contratos.md §4.3/§4.4). Os testes cadastram as entidades que
+/// gateways HTTP consomem (GET de clientes, veículos e serviços do Cadastro; GET de peça e de
+/// disponibilidade do PecasInsumos). Os testes cadastram as entidades que
 /// precisam por <c>Adicionar*</c> e consultam as requisições recebidas por <see cref="Requisicoes"/>.
 /// </summary>
 public sealed partial class FakeServicosExternos : HttpMessageHandler

@@ -4,7 +4,8 @@ namespace OrdensServico.Infrastructure.Http;
 
 /// <summary>
 /// Repassa o header <c>Authorization</c> da requisição de entrada para as chamadas HTTP de saída
-/// aos serviços Cadastro e PecasInsumos (00-contratos.md §4.4). Sem requisição de entrada
+/// aos serviços Cadastro e PecasInsumos, que validam o mesmo JWT da requisição original (a OS
+/// não emite token próprio para chamadas entre serviços). Sem requisição de entrada
 /// (ex.: execução fora de um request HTTP) ou sem o header, a chamada segue sem credencial.
 /// </summary>
 public sealed class EncaminharAuthorizationHandler : DelegatingHandler

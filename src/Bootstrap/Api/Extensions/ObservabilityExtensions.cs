@@ -16,7 +16,8 @@ namespace Api.Extensions;
 /// </summary>
 public static class ObservabilityExtensions
 {
-    // Usado quando OTEL_SERVICE_NAME não está definido (00-contratos.md §2).
+    // Usado quando OTEL_SERVICE_NAME não está definido. Cada serviço da oficina se identifica nos
+    // traces e métricas como "oficina-mecanica-<serviço>".
     private const string ServiceNamePadrao = "oficina-mecanica-ordens-servico";
 
     // Meters de negócio criados por outra tarefa (em paralelo), registrados aqui apenas pelo

@@ -1,7 +1,9 @@
 namespace OrdensServico.Infrastructure.Messaging;
 
 /// <summary>
-/// Configuração da mensageria (00-contratos.md §3.1): chaves <c>Mensageria__*</c>.
+/// Configuração da mensageria (MassTransit), chaves <c>Mensageria__*</c>: transporte
+/// (<c>AmazonSqs</c> na AWS e no LocalStack, <c>InMemory</c> em testes), região, URL do serviço
+/// (LocalStack) e credenciais do ambiente local.
 /// </summary>
 public sealed class MensageriaOptions
 {

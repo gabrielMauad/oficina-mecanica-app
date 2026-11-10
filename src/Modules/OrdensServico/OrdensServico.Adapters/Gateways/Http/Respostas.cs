@@ -1,6 +1,7 @@
 namespace OrdensServico.Adapters.Gateways.Http;
 
-// Recortes das respostas dos serviços Cadastro e PecasInsumos (ver 00-contratos.md §4.3/§4.4):
+// Recortes das respostas dos serviços Cadastro (GET /api/v1/clientes|veiculos|servicos/{id}) e
+// PecasInsumos (GET /api/v1/pecas-insumos/{id} e /api/v1/pecas-insumos/{id}/disponibilidade):
 // apenas os campos que a OS consome. Campos extras do JSON são ignorados na desserialização.
 
 internal sealed record ClienteResposta(Guid Id, string Nome, string Email, bool Ativo);
