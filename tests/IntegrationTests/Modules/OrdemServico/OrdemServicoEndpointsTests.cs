@@ -40,33 +40,16 @@ public class OrdemServicoEndpointsTests
         using var client = _factory.CreateAuthenticatedClient(token);
 
         // 1. Criar Cliente
-        var clienteId = await CriarClienteAsync(client,
-            nome: TestData.Nome("Carlos Teste OS"),
-            documento: TestData.Cpf(),
-            email: TestData.Email("carlos.os"),
-            telefone: "31999990010");
+        var clienteId = _factory.ServicosExternos.AdicionarCliente(nome: TestData.Nome("Carlos Teste OS"), email: TestData.Email("carlos.os"));
 
         // 2. Criar Veículo (vinculado ao cliente)
-        var veiculoId = await CriarVeiculoAsync(client,
-            placa: TestData.PlacaMercosul(),
-            modelo: "Corolla",
-            marca: "Toyota",
-            ano: 2021,
-            clienteId: clienteId);
+        var veiculoId = _factory.ServicosExternos.AdicionarVeiculo(placa: TestData.PlacaMercosul(), clienteId: clienteId);
 
         // 3. Criar Serviço no catálogo
-        var servicoId = await CriarServicoAsync(client,
-            nome: TestData.Nome("Troca de Óleo OS"),
-            descricao: TestData.Descricao("Troca de óleo do motor"),
-            preco: 150.00m);
+        var servicoId = _factory.ServicosExternos.AdicionarServico(nome: TestData.Nome("Troca de Óleo OS"), preco: 150.00m);
 
         // 4. Criar Peça/Insumo com estoque
-        var pecaId = await CriarPecaAsync(client,
-            nome: TestData.Nome("Óleo 5W30 1L"),
-            descricao: TestData.Descricao("Óleo mineral"),
-            preco: 35.00m,
-            estoque: 50,
-            unidade: "Litro");
+        var pecaId = _factory.ServicosExternos.AdicionarPeca(nome: TestData.Nome("Óleo 5W30 1L"), preco: 35.00m, estoque: 50, unidade: "Litro");
 
         // ── Ciclo de vida da OS ──
 
@@ -174,30 +157,13 @@ public class OrdemServicoEndpointsTests
         var token = await _factory.GetAuthTokenAsync();
         using var client = _factory.CreateAuthenticatedClient(token);
 
-        var clienteId = await CriarClienteAsync(client,
-            nome: TestData.Nome("Rejeita OS Cliente"),
-            documento: TestData.Cpf(),
-            email: TestData.Email("rejeita.os"),
-            telefone: "31999990020");
+        var clienteId = _factory.ServicosExternos.AdicionarCliente(nome: TestData.Nome("Rejeita OS Cliente"), email: TestData.Email("rejeita.os"));
 
-        var veiculoId = await CriarVeiculoAsync(client,
-            placa: TestData.PlacaMercosul(),
-            modelo: "Gol",
-            marca: "VW",
-            ano: 2019,
-            clienteId: clienteId);
+        var veiculoId = _factory.ServicosExternos.AdicionarVeiculo(placa: TestData.PlacaMercosul(), clienteId: clienteId);
 
-        var servicoId = await CriarServicoAsync(client,
-            nome: TestData.Nome("Revisão Completa Rejeita"),
-            descricao: null,
-            preco: 200.00m);
+        var servicoId = _factory.ServicosExternos.AdicionarServico(nome: TestData.Nome("Revisão Completa Rejeita"), preco: 200.00m);
 
-        var pecaId = await CriarPecaAsync(client,
-            nome: TestData.Nome("Filtro Ar K&N"),
-            descricao: null,
-            preco: 80.00m,
-            estoque: 10,
-            unidade: "Unidade");
+        var pecaId = _factory.ServicosExternos.AdicionarPeca(nome: TestData.Nome("Filtro Ar K&N"), preco: 80.00m, estoque: 10, unidade: "Unidade");
 
         // Criar OS e avançar até AguardandoAprovacao (estado necessário para rejeitar)
         var osResponse = await client.PostAsJsonAsync("/api/v1/ordens-servico", new
@@ -250,18 +216,9 @@ public class OrdemServicoEndpointsTests
         var token = await _factory.GetAuthTokenAsync();
         using var authClient = _factory.CreateAuthenticatedClient(token);
 
-        var clienteId = await CriarClienteAsync(authClient,
-            nome: TestData.Nome("Cliente Lista Oficina"),
-            documento: TestData.Cpf(),
-            email: TestData.Email("lista.oficina"),
-            telefone: "31999990030");
+        var clienteId = _factory.ServicosExternos.AdicionarCliente(nome: TestData.Nome("Cliente Lista Oficina"), email: TestData.Email("lista.oficina"));
 
-        var veiculoId = await CriarVeiculoAsync(authClient,
-            placa: TestData.PlacaMercosul(),
-            modelo: "Fiesta",
-            marca: "Ford",
-            ano: 2018,
-            clienteId: clienteId);
+        var veiculoId = _factory.ServicosExternos.AdicionarVeiculo(placa: TestData.PlacaMercosul(), clienteId: clienteId);
 
         var osResponse = await authClient.PostAsJsonAsync("/api/v1/ordens-servico", new
         {
@@ -315,18 +272,9 @@ public class OrdemServicoEndpointsTests
         var token = await _factory.GetAuthTokenAsync();
         using var client = _factory.CreateAuthenticatedClient(token);
 
-        var donoId = await CriarClienteAsync(client,
-            nome: TestData.Nome("Dono da OS"),
-            documento: TestData.Cpf(),
-            email: TestData.Email("dono.os"),
-            telefone: "31999990080");
+        var donoId = _factory.ServicosExternos.AdicionarCliente(nome: TestData.Nome("Dono da OS"), email: TestData.Email("dono.os"));
 
-        var veiculoId = await CriarVeiculoAsync(client,
-            placa: TestData.PlacaMercosul(),
-            modelo: "Argo",
-            marca: "Fiat",
-            ano: 2022,
-            clienteId: donoId);
+        var veiculoId = _factory.ServicosExternos.AdicionarVeiculo(placa: TestData.PlacaMercosul(), clienteId: donoId);
 
         var osResponse = await client.PostAsJsonAsync("/api/v1/ordens-servico", new
         {
@@ -350,30 +298,13 @@ public class OrdemServicoEndpointsTests
         var token = await _factory.GetAuthTokenAsync();
         using var client = _factory.CreateAuthenticatedClient(token);
 
-        var donoId = await CriarClienteAsync(client,
-            nome: TestData.Nome("Dono do Orcamento"),
-            documento: TestData.Cpf(),
-            email: TestData.Email("dono.orcamento"),
-            telefone: "31999990090");
+        var donoId = _factory.ServicosExternos.AdicionarCliente(nome: TestData.Nome("Dono do Orcamento"), email: TestData.Email("dono.orcamento"));
 
-        var veiculoId = await CriarVeiculoAsync(client,
-            placa: TestData.PlacaMercosul(),
-            modelo: "Kwid",
-            marca: "Renault",
-            ano: 2021,
-            clienteId: donoId);
+        var veiculoId = _factory.ServicosExternos.AdicionarVeiculo(placa: TestData.PlacaMercosul(), clienteId: donoId);
 
-        var servicoId = await CriarServicoAsync(client,
-            nome: TestData.Nome("Troca de Amortecedor"),
-            descricao: null,
-            preco: 300.00m);
+        var servicoId = _factory.ServicosExternos.AdicionarServico(nome: TestData.Nome("Troca de Amortecedor"), preco: 300.00m);
 
-        var pecaId = await CriarPecaAsync(client,
-            nome: TestData.Nome("Amortecedor Traseiro"),
-            descricao: null,
-            preco: 150.00m,
-            estoque: 5,
-            unidade: "Unidade");
+        var pecaId = _factory.ServicosExternos.AdicionarPeca(nome: TestData.Nome("Amortecedor Traseiro"), preco: 150.00m, estoque: 5, unidade: "Unidade");
 
         var osResponse = await client.PostAsJsonAsync("/api/v1/ordens-servico", new
         {
@@ -468,18 +399,9 @@ public class OrdemServicoEndpointsTests
         var token = await _factory.GetAuthTokenAsync();
         using var client = _factory.CreateAuthenticatedClient(token);
 
-        var clienteId = await CriarClienteAsync(client,
-            nome: TestData.Nome("Transicao Invalida"),
-            documento: TestData.Cpf(),
-            email: TestData.Email("transicao.invalida"),
-            telefone: "31999990040");
+        var clienteId = _factory.ServicosExternos.AdicionarCliente(nome: TestData.Nome("Transicao Invalida"), email: TestData.Email("transicao.invalida"));
 
-        var veiculoId = await CriarVeiculoAsync(client,
-            placa: TestData.PlacaMercosul(),
-            modelo: "Palio",
-            marca: "Fiat",
-            ano: 2017,
-            clienteId: clienteId);
+        var veiculoId = _factory.ServicosExternos.AdicionarVeiculo(placa: TestData.PlacaMercosul(), clienteId: clienteId);
 
         var osResponse = await client.PostAsJsonAsync("/api/v1/ordens-servico", new
         {
@@ -513,74 +435,8 @@ public class OrdemServicoEndpointsTests
         return os!;
     }
 
-    private async Task<Guid> CriarClienteAsync(HttpClient client,
-        string nome, string documento, string email, string telefone)
-    {
-        var response = await client.PostAsJsonAsync("/api/v1/clientes", new
-        {
-            Nome = nome,
-            Documento = documento,
-            Email = email,
-            Telefone = telefone,
-            PessoaFisica = true
-        });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<IdDto>(JsonOptions);
-        return body!.ClienteId;
-    }
-
-    private async Task<Guid> CriarVeiculoAsync(HttpClient client,
-        string placa, string modelo, string marca, int ano, Guid clienteId)
-    {
-        var response = await client.PostAsJsonAsync("/api/v1/veiculos", new
-        {
-            Placa = placa,
-            Modelo = modelo,
-            Marca = marca,
-            Ano = ano,
-            ClienteId = clienteId
-        });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<VeiculoIdDto>(JsonOptions);
-        return body!.VeiculoId;
-    }
-
-    private async Task<Guid> CriarServicoAsync(HttpClient client,
-        string nome, string? descricao, decimal preco)
-    {
-        var response = await client.PostAsJsonAsync("/api/v1/servicos", new
-        {
-            Nome = nome,
-            Descricao = descricao,
-            Preco = preco
-        });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<ServicoIdDto>(JsonOptions);
-        return body!.ServicoId;
-    }
-
-    private async Task<Guid> CriarPecaAsync(HttpClient client,
-        string nome, string? descricao, decimal preco, int estoque, string unidade)
-    {
-        var response = await client.PostAsJsonAsync("/api/v1/pecas-insumos", new
-        {
-            Nome = nome,
-            Descricao = descricao,
-            Preco = preco,
-            QuantidadeEmEstoque = estoque,
-            UnidadeDeMedida = unidade
-        });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<PecaIdDto>(JsonOptions);
-        return body!.PecaInsumoId;
-    }
-
     // ── DTOs locais para desserialização ──
 
-    private sealed record IdDto(Guid ClienteId);
-    private sealed record VeiculoIdDto(Guid VeiculoId);
-    private sealed record ServicoIdDto(Guid ServicoId);
-    private sealed record PecaIdDto(Guid PecaInsumoId);
 
     private sealed record OrdemServicoDto(
         Guid Id,

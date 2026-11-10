@@ -3,21 +3,10 @@
   <Folder Name="/src/Bootstrap/">
     <Project Path="src/Bootstrap/Api/Api.csproj" />
   </Folder>
+  <Folder Name="/src/Contracts/">
+    <Project Path="src/Contracts/OficinaMecanica.Contracts/OficinaMecanica.Contracts.csproj" />
+  </Folder>
   <Folder Name="/src/Modules/" />
-  <Folder Name="/src/Modules/Autenticacao/">
-    <Project Path="src/Modules/Autenticacao/Autenticacao.Adapters/Autenticacao.Adapters.csproj" />
-    <Project Path="src/Modules/Autenticacao/Autenticacao.Application/Autenticacao.Application.csproj" />
-    <Project Path="src/Modules/Autenticacao/Autenticacao.Infrastructure/Autenticacao.Infrastructure.csproj" />
-    <Project Path="src/Modules/Autenticacao/Autenticacao.Web/Autenticacao.Web.csproj" />
-  </Folder>
-  <Folder Name="/src/Modules/Cadastro/">
-    <Project Path="src/Modules/Cadastro/Cadastro.Adapters/Cadastro.Adapters.csproj" />
-    <Project Path="src/Modules/Cadastro/Cadastro.Application/Cadastro.Application.csproj" />
-    <Project Path="src/Modules/Cadastro/Cadastro.Contracts/Cadastro.Contracts.csproj" />
-    <Project Path="src/Modules/Cadastro/Cadastro.Domain/Cadastro.Domain.csproj" />
-    <Project Path="src/Modules/Cadastro/Cadastro.Infrastructure/Cadastro.Infrastructure.csproj" />
-    <Project Path="src/Modules/Cadastro/Cadastro.Web/Cadastro.Web.csproj" />
-  </Folder>
   <Folder Name="/src/Modules/OrdensServico/">
     <Project Path="src/Modules/OrdensServico/OrdensServico.Adapters/OrdensServico.Adapters.csproj" />
     <Project Path="src/Modules/OrdensServico/OrdensServico.Application/OrdensServico.Application.csproj" />
@@ -25,14 +14,6 @@
     <Project Path="src/Modules/OrdensServico/OrdensServico.Domain/OrdensServico.Domain.csproj" />
     <Project Path="src/Modules/OrdensServico/OrdensServico.Infrastructure/OrdensServico.Infrastructure.csproj" />
     <Project Path="src/Modules/OrdensServico/OrdensServico.Web/OrdensServico.Web.csproj" />
-  </Folder>
-  <Folder Name="/src/Modules/PecasInsumos/">
-    <Project Path="src/Modules/PecasInsumos/PecasInsumos.Adapters/PecasInsumos.Adapters.csproj" />
-    <Project Path="src/Modules/PecasInsumos/PecasInsumos.Application/PecasInsumos.Application.csproj" />
-    <Project Path="src/Modules/PecasInsumos/PecasInsumos.Contracts/PecasInsumos.Contracts.csproj" />
-    <Project Path="src/Modules/PecasInsumos/PecasInsumos.Domain/PecasInsumos.Domain.csproj" />
-    <Project Path="src/Modules/PecasInsumos/PecasInsumos.Infrastructure/PecasInsumos.Infrastructure.csproj" />
-    <Project Path="src/Modules/PecasInsumos/PecasInsumos.Web/PecasInsumos.Web.csproj" />
   </Folder>
   <Folder Name="/src/SharedKernel/">
     <Project Path="src/SharedKernel/SharedKernel.Application/SharedKernel.Application.csproj" />
@@ -45,19 +26,10 @@
     <Project Path="tests/SharedKernel/SharedKernel.Application.Tests/SharedKernel.Application.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/Modules/" />
-  <Folder Name="/tests/Modules/Autenticacao/">
-    <Project Path="tests/Modules/Autenticacao/Autenticacao.Application.Tests/Autenticacao.Application.Tests.csproj" />
-  </Folder>
-  <Folder Name="/tests/Modules/Cadastro/">
-    <Project Path="tests/Modules/Cadastro/Cadastro.Application.Tests/Cadastro.Application.Tests.csproj" />
-    <Project Path="tests/Modules/Cadastro/Cadastro.Domain.Tests/Cadastro.Domain.Tests.csproj" />
-  </Folder>
   <Folder Name="/tests/Modules/OrdensServico/">
+    <Project Path="tests/Modules/OrdensServico/OrdemServico.Adapters.Tests/OrdemServico.Adapters.Tests.csproj" />
     <Project Path="tests/Modules/OrdensServico/OrdemServico.Application.Tests/OrdemServico.Application.Tests.csproj" />
     <Project Path="tests/Modules/OrdensServico/OrdemServico.Domain.Tests/OrdemServico.Domain.Tests.csproj" />
-  </Folder>
-  <Folder Name="/tests/Modules/PecasInsumos/">
-    <Project Path="tests/Modules/PecasInsumos/PecasInsumos.Application.Tests/PecasInsumos.Application.Tests.csproj" />
-    <Project Path="tests/Modules/PecasInsumos/PecasInsumos.Domain.Tests/PecasInsumos.Domain.Tests.csproj" />
+    <Project Path="tests/Modules/OrdensServico/OrdemServico.Infrastructure.Tests/OrdemServico.Infrastructure.Tests.csproj" />
   </Folder>
 </Solution>

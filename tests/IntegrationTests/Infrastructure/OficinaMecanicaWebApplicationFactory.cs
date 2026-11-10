@@ -1,10 +1,14 @@
+using MassTransit;
+using MassTransit.Testing;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Http;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net.Http.Headers;
-using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text;
 using Testcontainers.PostgreSql;
@@ -16,26 +20,22 @@ namespace IntegrationTests.Infrastructure;
 /// Sobe um container PostgreSQL real (Testcontainers) uma única vez por sessão de testes,
 /// aplica migrations automaticamente (via Program.cs que já chama MigrateAsync no startup),
 /// e fornece helpers de autenticação.
+///
+/// Cadastro e PecasInsumos são serviços externos: os gateways HTTP da OS são atendidos por
+/// <see cref="ServicosExternos"/>, e a mensageria roda em memória com o test harness do
+/// MassTransit (<see cref="CriarHarness"/>) para verificar o que a OS publica.
 /// </summary>
 public sealed class OficinaMecanicaWebApplicationFactory
     : WebApplicationFactory<Program>, IAsyncLifetime
 {
-    // Credenciais de teste — mesmas injetadas na configuração do host
-    private const string TestJwtSecret = "integration-test-jwt-secret-minimum-32-chars!!";
-    private const string TestAdminEmail = "admin@integration.test";
-    private const string TestAdminSenha = "Test@Integration1234";
-
-    // Mesmos valores configurados via Jwt:Issuer / Jwt:Audience / Jwt:ValidIssuers abaixo —
-    // ver RFC-001 §4.1 (contrato do token) e ADR-003 (dois emissores).
-    private const string AppIssuer = "oficina-mecanica-app";
-    private const string ClienteAuthIssuer = "oficina-mecanica-auth";
-    private const string Audience = "oficina-mecanica-api";
-
-    private readonly PostgreSqlContainer _db = new PostgreSqlBuilder()
-        .WithDatabase("oficina_mecanica")
+    private readonly PostgreSqlContainer _db = new PostgreSqlBuilder("postgres:15.1")
+        .WithDatabase("ordens_servico")
         .WithUsername("postgres")
         .WithPassword("postgres")
         .Build();
+
+    /// <summary>Fake de Cadastro e PecasInsumos, compartilhado pelos testes da coleção.</summary>
+    public FakeServicosExternos ServicosExternos { get; } = new();
 
     // IAsyncLifetime.InitializeAsync — xunit.v3 chama antes do primeiro teste da coleção
     public async ValueTask InitializeAsync()
@@ -55,31 +55,28 @@ public sealed class OficinaMecanicaWebApplicationFactory
     {
         builder.UseEnvironment("Testing");
 
-        // Sobrescreve configurações sensíveis com valores de teste.
+        // Sobrescreve configurações com valores de teste.
         // ConfigureAppConfiguration adiciona fontes APÓS os defaults (appsettings.json),
         // então estes valores têm prioridade.
         builder.ConfigureAppConfiguration((_, cfg) =>
+            cfg.AddInMemoryCollection(TestConfiguration.Valores(_db.GetConnectionString())));
+
+        builder.ConfigureTestServices(services =>
         {
-            cfg.AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                // Connection string aponta para o container Testcontainers
-                ["ConnectionStrings:Default"] = _db.GetConnectionString(),
-                // JWT secret — mesmo valor usado para gerar e validar tokens nos testes
-                ["Jwt:Secret"] = TestJwtSecret,
-                ["Jwt:Issuer"] = AppIssuer,
-                ["Jwt:Audience"] = Audience,
-                ["Jwt:ValidIssuers:0"] = AppIssuer,
-                ["Jwt:ValidIssuers:1"] = ClienteAuthIssuer,
-                // Credenciais do admin — usadas pelo LoginHandler
-                ["Auth:AdminEmail"] = TestAdminEmail,
-                ["Auth:AdminSenha"] = TestAdminSenha,
-                // A exposição do OpenAPI/Scalar não depende mais do ambiente (ver
-                // Api.Extensions.OpenApiExtensions), então é desligada explicitamente aqui
-                // para manter a suíte de integração rápida e sem rotas de documentação.
-                ["OpenApi:Enabled"] = "false",
-            });
+            // Os HttpClients dos gateways passam a falar com o fake em vez de sair pela rede. O
+            // DelegatingHandler que repassa o Authorization continua na cadeia, na frente do fake.
+            services.ConfigureAll<HttpClientFactoryOptions>(options =>
+                options.HttpMessageHandlerBuilderActions.Add(b => b.PrimaryHandler = ServicosExternos));
+
+            // Mesmo transporte em memória da aplicação, agora com o harness para observar publicações.
+            services.AddMassTransitTestHarness();
         });
     }
+
+    /// <summary>
+    /// Harness do MassTransit do host de teste: permite verificar os eventos de integração publicados.
+    /// </summary>
+    public ITestHarness CriarHarness() => Services.GetRequiredService<ITestHarness>();
 
     /// <summary>
     /// Cria um HttpClient com Authorization: Bearer {token} pré-configurado.
@@ -93,50 +90,20 @@ public sealed class OficinaMecanicaWebApplicationFactory
     }
 
     /// <summary>
-    /// Autentica no endpoint POST /api/v1/auth/login com as credenciais de teste
-    /// e retorna o JWT token.
+    /// Token de papel Oficina. O login da oficina é emitido pelo serviço de Autenticação
+    /// (issuer "oficina-mecanica-app"); este serviço só valida o JWT, então o token é montado
+    /// aqui com o mesmo segredo de teste.
     /// </summary>
-    public async Task<string> GetAuthTokenAsync()
-    {
-        using var client = CreateClient();
-
-        var response = await client.PostAsJsonAsync("/api/v1/auth/login", new
-        {
-            Email = TestAdminEmail,
-            Senha = TestAdminSenha
-        });
-
-        response.EnsureSuccessStatusCode();
-
-        var body = await response.Content.ReadFromJsonAsync<LoginResponseDto>();
-        return body!.Token;
-    }
+    public Task<string> GetAuthTokenAsync() => Task.FromResult(GerarToken(
+        TestConfiguration.AppIssuer, subject: "admin@integration.test", role: "Oficina"));
 
     /// <summary>
     /// Gera um token de papel Cliente assinado com o mesmo segredo de teste, simulando o
     /// token que a Function Serverless (emissor "oficina-mecanica-auth") emitiria — ver
     /// RFC-001 §4.1. A aplicação não emite esse token, então é montado diretamente aqui.
     /// </summary>
-    public string GetClienteAuthToken(Guid clienteId)
-    {
-        var claims = new[]
-        {
-            new Claim(JwtRegisteredClaimNames.Sub, clienteId.ToString()),
-            new Claim("role", "Cliente")
-        };
-
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(TestJwtSecret));
-        var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-
-        var token = new JwtSecurityToken(
-            issuer: ClienteAuthIssuer,
-            audience: Audience,
-            claims: claims,
-            expires: DateTime.UtcNow.AddHours(1),
-            signingCredentials: credentials);
-
-        return new JwtSecurityTokenHandler().WriteToken(token);
-    }
+    public string GetClienteAuthToken(Guid clienteId) => GerarToken(
+        TestConfiguration.ClienteAuthIssuer, subject: clienteId.ToString(), role: "Cliente");
 
     /// <summary>
     /// Cria um HttpClient autenticado com um token de papel Cliente para o clienteId informado.
@@ -144,7 +111,26 @@ public sealed class OficinaMecanicaWebApplicationFactory
     public HttpClient CreateClienteAuthenticatedClient(Guid clienteId) =>
         CreateAuthenticatedClient(GetClienteAuthToken(clienteId));
 
-    private sealed record LoginResponseDto(string Token, DateTime ExpiresAt);
+    private static string GerarToken(string issuer, string subject, string role)
+    {
+        var claims = new[]
+        {
+            new Claim(JwtRegisteredClaimNames.Sub, subject),
+            new Claim("role", role)
+        };
+
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(TestConfiguration.JwtSecret));
+        var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+        var token = new JwtSecurityToken(
+            issuer: issuer,
+            audience: TestConfiguration.Audience,
+            claims: claims,
+            expires: DateTime.UtcNow.AddHours(1),
+            signingCredentials: credentials);
+
+        return new JwtSecurityTokenHandler().WriteToken(token);
+    }
 }
 
 /// <summary>

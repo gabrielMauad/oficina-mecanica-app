@@ -11,6 +11,8 @@ using OrdensServico.Application.Ordens.Commands.GerarOrdemServico;
 using OrdensServico.Application.Ordens.Queries.ListarOrdensParaAcompanhamento;
 using OrdensServico.Application.Ordens.Queries.ListarOrdensPorCliente;
 using OrdensServico.Contracts.Queries;
+using OrdensServico.Infrastructure.Http;
+using OrdensServico.Infrastructure.Messaging;
 using OrdensServico.Infrastructure.Persistence;
 using OrdensServico.Infrastructure.Persistence.Repositories;
 using OrdensServico.Infrastructure.Queries;
@@ -31,6 +33,9 @@ public static class OrdemServicoModule
 
         services.AddSingleton<OrdensServicoMetrics>();
 
+        // Barramento de eventos de integração (MassTransit sobre SNS/SQS).
+        services.AddMensageria(configuration);
+
         #region DataSources (Repositórios EF)
 
         services.AddScoped<IOrdemServicoRepository, OrdemServicoRepository>();
@@ -40,12 +45,10 @@ public static class OrdemServicoModule
         #region Gateways (Interface Adapters)
 
         services.AddScoped<IOrdemServicoGateway, OrdemServicoGateway>();
-        services.AddScoped<IClienteGateway, ClienteGateway>();
-        services.AddScoped<IVeiculoGateway, VeiculoGateway>();
-        services.AddScoped<IServicoGateway, ServicoGateway>();
-        services.AddScoped<IPecaDisponibilidadeGateway, PecaDisponibilidadeGateway>();
-        services.AddScoped<IPecaInsumoInfoGateway, PecaInsumoInfoGateway>();
         services.AddScoped<INotificacaoClienteGateway, NotificacaoClienteGateway>();
+
+        // Cadastro e PecasInsumos são serviços externos: consultados por HTTP (HttpClient tipado).
+        services.AddGatewaysHttp();
 
         #endregion
 

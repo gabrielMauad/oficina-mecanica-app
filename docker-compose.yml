@@ -1,64 +1,69 @@
+# Serviço OrdensServico + Postgres próprio. LocalStack e Jaeger vêm de docker-compose.infra.yml,
+# que cria a rede `oficina-local`: suba primeiro a infraestrutura
+#   docker compose -f docker-compose.infra.yml up -d
+# e depois este arquivo (docker compose up -d).
 services:
-  api:
+  ordens-servico:
     build:
       context: .
       dockerfile: src/Bootstrap/Api/Dockerfile
+    container_name: oficina-ordens-servico
     ports:
       - "8080:8080"
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ASPNETCORE_URLS=http://+:8080
-      - ConnectionStrings__Default=Host=postgres;Port=5432;Username=oficina;Password=oficina-dev-pass;Database=oficina_mecanica;SSL Mode=Disable
+      - ConnectionStrings__Default=Host=oficina-ordens-servico-postgres;Port=5432;Username=oficina;Password=oficina-dev-pass;Database=ordens_servico;SSL Mode=Disable
       - Jwt__Secret=docker-dev-secret-key-replace-in-prod-000
-      - Jwt__Issuer=oficina-mecanica-app
       - Jwt__Audience=oficina-mecanica-api
       - Jwt__ValidIssuers__0=oficina-mecanica-app
       - Jwt__ValidIssuers__1=oficina-mecanica-auth
-      - Auth__AdminEmail=admin@oficina.com
-      - Auth__AdminSenha=admin123
       - OpenApi__Enabled=true
+      # Mensageria (MassTransit sobre SNS/SQS) apontando para o LocalStack.
+      - Mensageria__Transporte=AmazonSqs
+      - Mensageria__Regiao=us-east-1
+      - Mensageria__ServiceUrl=http://oficina-localstack:4566
+      - Mensageria__AccessKey=test
+      - Mensageria__SecretKey=test
+      # Serviços consultados por HTTP (containers dos respectivos repositórios, na rede oficina-local).
+      - Servicos__Cadastro__BaseUrl=http://oficina-cadastro:8080
+      - Servicos__PecasInsumos__BaseUrl=http://oficina-pecas-insumos:8080
       # OTLP: destino configurável por variável de ambiente padrão do OpenTelemetry (ADR-004),
-      # sem nada específico de fornecedor. Aqui aponta para o Jaeger local do compose; em outro
-      # ambiente basta trocar o endpoint (e, se preciso, OTEL_EXPORTER_OTLP_HEADERS) para o
-      # coletor/APM real — nenhum código muda. Traces e métricas chegam no Jaeger normalmente;
-      # logs (RFC-004, Tarefa 3) também são exportados para este mesmo endpoint, mas o Jaeger
-      # all-in-one não implementa o serviço OTLP de logs — essas tentativas falham em silêncio no
-      # self-diagnostics do OpenTelemetry (mesmo padrão que métricas já tinham antes desta
-      # mudança), nunca no console/`docker compose logs api`.
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      # sem nada específico de fornecedor. Aqui aponta para o Jaeger local; em outro ambiente basta
+      # trocar o endpoint (e, se preciso, OTEL_EXPORTER_OTLP_HEADERS) — nenhum código muda.
+      # Traces e métricas chegam no Jaeger normalmente; os logs (RFC-004) também são enviados a este
+      # endpoint, mas o Jaeger all-in-one não implementa o serviço OTLP de logs — essas tentativas
+      # falham em silêncio no self-diagnostics do OpenTelemetry, nunca no console do container.
+      - OTEL_SERVICE_NAME=oficina-mecanica-ordens-servico
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://oficina-jaeger:4317
     depends_on:
       postgres:
         condition: service_healthy
-      jaeger:
-        condition: service_started
-
-  jaeger:
-    image: jaegertracing/all-in-one:1.76.0
-    container_name: oficina-jaeger
-    environment:
-      - COLLECTOR_OTLP_ENABLED=true
-    ports:
-      - "16686:16686" # UI: http://localhost:16686
-      - "4317:4317"   # OTLP gRPC
-      - "4318:4318"   # OTLP HTTP
+    networks:
+      - default
+      - oficina-local
 
   postgres:
     image: postgres:16
     restart: always
-    container_name: oficina-postgres
+    container_name: oficina-ordens-servico-postgres
     environment:
-      POSTGRES_DB: oficina_mecanica
+      POSTGRES_DB: ordens_servico
       POSTGRES_USER: oficina
       POSTGRES_PASSWORD: oficina-dev-pass
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U oficina -d oficina_mecanica"]
+      test: ["CMD-SHELL", "pg_isready -U oficina -d ordens_servico"]
       interval: 10s
       timeout: 5s
       retries: 5
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - ordens_servico_postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
 
+networks:
+  oficina-local:
+    external: true
+
 volumes:
-  postgres_data:
+  ordens_servico_postgres_data:

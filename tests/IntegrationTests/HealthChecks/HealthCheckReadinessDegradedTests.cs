@@ -2,6 +2,7 @@ using System.Net;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
+using IntegrationTests.Infrastructure;
 using Testcontainers.PostgreSql;
 
 namespace IntegrationTests.HealthChecks;
@@ -13,10 +14,8 @@ namespace IntegrationTests.HealthChecks;
 /// </summary>
 public sealed class HealthCheckReadinessDegradedTests : IAsyncLifetime
 {
-    private const string JwtSecret = "integration-test-jwt-secret-minimum-32-chars!!";
-
-    private readonly PostgreSqlContainer _db = new PostgreSqlBuilder()
-        .WithDatabase("oficina_mecanica")
+    private readonly PostgreSqlContainer _db = new PostgreSqlBuilder("postgres:15.1")
+        .WithDatabase("ordens_servico")
         .WithUsername("postgres")
         .WithPassword("postgres")
         .Build();
@@ -32,23 +31,7 @@ public sealed class HealthCheckReadinessDegradedTests : IAsyncLifetime
             builder.UseEnvironment("Testing");
             builder.ConfigureAppConfiguration((_, cfg) =>
             {
-                cfg.AddInMemoryCollection(new Dictionary<string, string?>
-                {
-                    ["ConnectionStrings:Default"] = _db.GetConnectionString(),
-                    ["Jwt:Secret"] = JwtSecret,
-                    ["Auth:AdminEmail"] = "admin@integration.test",
-                    ["Auth:AdminSenha"] = "Test@Integration1234",
-                    // Este teste monta o próprio WebApplicationFactory (não usa o
-                    // OficinaMecanicaWebApplicationFactory compartilhado), então precisa repetir aqui
-                    // as chaves que a configuração da aplicação exige no startup: issuer/audience são
-                    // obrigatórios na validação do JWT (RFC-001 §4.1) e a documentação OpenAPI/Scalar
-                    // fica desligada nos testes.
-                    ["Jwt:Issuer"] = "oficina-mecanica-app",
-                    ["Jwt:Audience"] = "oficina-mecanica-api",
-                    ["Jwt:ValidIssuers:0"] = "oficina-mecanica-app",
-                    ["Jwt:ValidIssuers:1"] = "oficina-mecanica-auth",
-                    ["OpenApi:Enabled"] = "false",
-                });
+                cfg.AddInMemoryCollection(TestConfiguration.Valores(_db.GetConnectionString()));
             });
         });
 

@@ -48,18 +48,9 @@ public class OrdemServicoAcessoDoDonoTests
         var token = await _factory.GetAuthTokenAsync();
         using var oficinaClient = _factory.CreateAuthenticatedClient(token);
 
-        var donoId = await CriarClienteAsync(oficinaClient,
-            nome: TestData.Nome("Dono do Status"),
-            documento: TestData.Cpf(),
-            email: TestData.Email("dono.status"),
-            telefone: "31999990100");
+        var donoId = _factory.ServicosExternos.AdicionarCliente(nome: TestData.Nome("Dono do Status"), email: TestData.Email("dono.status"));
 
-        var veiculoId = await CriarVeiculoAsync(oficinaClient,
-            placa: TestData.PlacaMercosul(),
-            modelo: "HB20",
-            marca: "Hyundai",
-            ano: 2020,
-            clienteId: donoId);
+        var veiculoId = _factory.ServicosExternos.AdicionarVeiculo(placa: TestData.PlacaMercosul(), clienteId: donoId);
 
         var osId = await CriarOrdemServicoAsync(oficinaClient, donoId, veiculoId);
 
@@ -80,28 +71,13 @@ public class OrdemServicoAcessoDoDonoTests
         var token = await _factory.GetAuthTokenAsync();
         using var oficinaClient = _factory.CreateAuthenticatedClient(token);
 
-        var donoId = await CriarClienteAsync(oficinaClient,
-            nome: TestData.Nome("Dono da Rejeicao"),
-            documento: TestData.Cpf(),
-            email: TestData.Email("dono.rejeicao"),
-            telefone: "31999990110");
+        var donoId = _factory.ServicosExternos.AdicionarCliente(nome: TestData.Nome("Dono da Rejeicao"), email: TestData.Email("dono.rejeicao"));
 
-        var veiculoId = await CriarVeiculoAsync(oficinaClient,
-            placa: TestData.PlacaMercosul(),
-            modelo: "Onix",
-            marca: "Chevrolet",
-            ano: 2023,
-            clienteId: donoId);
+        var veiculoId = _factory.ServicosExternos.AdicionarVeiculo(placa: TestData.PlacaMercosul(), clienteId: donoId);
 
-        var servicoId = await CriarServicoAsync(oficinaClient,
-            nome: TestData.Nome("Alinhamento Acesso Dono"),
-            preco: 180.00m);
+        var servicoId = _factory.ServicosExternos.AdicionarServico(nome: TestData.Nome("Alinhamento Acesso Dono"), preco: 180.00m);
 
-        var pecaId = await CriarPecaAsync(oficinaClient,
-            nome: TestData.Nome("Contrapeso de Roda Acesso Dono"),
-            preco: 25.00m,
-            estoque: 20,
-            unidade: "Unidade");
+        var pecaId = _factory.ServicosExternos.AdicionarPeca(nome: TestData.Nome("Contrapeso de Roda Acesso Dono"), preco: 25.00m, estoque: 20, unidade: "Unidade");
 
         var osId = await CriarOrdemServicoAsync(oficinaClient, donoId, veiculoId);
 
@@ -149,73 +125,8 @@ public class OrdemServicoAcessoDoDonoTests
         return body!.Id;
     }
 
-    private async Task<Guid> CriarClienteAsync(HttpClient client,
-        string nome, string documento, string email, string telefone)
-    {
-        var response = await client.PostAsJsonAsync("/api/v1/clientes", new
-        {
-            Nome = nome,
-            Documento = documento,
-            Email = email,
-            Telefone = telefone,
-            PessoaFisica = true
-        });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<ClienteIdDto>(JsonOptions);
-        return body!.ClienteId;
-    }
-
-    private async Task<Guid> CriarVeiculoAsync(HttpClient client,
-        string placa, string modelo, string marca, int ano, Guid clienteId)
-    {
-        var response = await client.PostAsJsonAsync("/api/v1/veiculos", new
-        {
-            Placa = placa,
-            Modelo = modelo,
-            Marca = marca,
-            Ano = ano,
-            ClienteId = clienteId
-        });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<VeiculoIdDto>(JsonOptions);
-        return body!.VeiculoId;
-    }
-
-    private async Task<Guid> CriarServicoAsync(HttpClient client, string nome, decimal preco)
-    {
-        var response = await client.PostAsJsonAsync("/api/v1/servicos", new
-        {
-            Nome = nome,
-            Descricao = (string?)null,
-            Preco = preco
-        });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<ServicoIdDto>(JsonOptions);
-        return body!.ServicoId;
-    }
-
-    private async Task<Guid> CriarPecaAsync(HttpClient client,
-        string nome, decimal preco, int estoque, string unidade)
-    {
-        var response = await client.PostAsJsonAsync("/api/v1/pecas-insumos", new
-        {
-            Nome = nome,
-            Descricao = (string?)null,
-            Preco = preco,
-            QuantidadeEmEstoque = estoque,
-            UnidadeDeMedida = unidade
-        });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<PecaIdDto>(JsonOptions);
-        return body!.PecaInsumoId;
-    }
-
     // ── DTOs locais para desserialização ──
 
     private sealed record ErroDto(string Code, string Message);
     private sealed record OrdemServicoIdDto(Guid Id);
-    private sealed record ClienteIdDto(Guid ClienteId);
-    private sealed record VeiculoIdDto(Guid VeiculoId);
-    private sealed record ServicoIdDto(Guid ServicoId);
-    private sealed record PecaIdDto(Guid PecaInsumoId);
 }

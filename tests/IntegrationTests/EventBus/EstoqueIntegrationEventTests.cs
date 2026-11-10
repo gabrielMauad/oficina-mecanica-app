@@ -3,9 +3,16 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using IntegrationTests.Infrastructure;
+using MassTransit.Testing;
+using OficinaMecanica.Contracts.IntegrationEvents;
 
 namespace IntegrationTests.EventBus;
 
+/// <summary>
+/// A OS publica <see cref="OrcamentoGeradoIntegrationEvent"/> e <see cref="OrcamentoRejeitadoIntegrationEvent"/>
+/// no barramento (MassTransit). A baixa e o estorno de estoque são efeitos do serviço PecasInsumos ao
+/// consumir esses eventos — aqui só se verifica o que a OS publica.
+/// </summary>
 [Collection("Integration")]
 public class EstoqueIntegrationEventTests
 {
@@ -28,261 +35,110 @@ public class EstoqueIntegrationEventTests
         _factory = factory;
     }
 
-    [Fact(DisplayName = "OrcamentoGerado → estoque é decrementado automaticamente via integration event")]
-    public async Task RegistrarDiagnostico_DeveDecrementarEstoque_ViaIntegrationEvent()
+    [Fact(DisplayName = "RegistrarDiagnostico → publica OrcamentoGerado com as peças do orçamento")]
+    public async Task RegistrarDiagnostico_DevePublicarOrcamentoGerado()
     {
-        // ──────────────────────────────────────────────────────────────
-        // ARRANGE — preparar todos os pré-requisitos
-        // ──────────────────────────────────────────────────────────────
-
-        var token = await _factory.GetAuthTokenAsync();
-        using var client = _factory.CreateAuthenticatedClient(token);
-
-        const int estoqueInicial = 10;
-        const int quantidadeUsada = 3;
-        const int estoqueEsperadoApos = estoqueInicial - quantidadeUsada; // 7
-
-        // 1. Criar peça com estoque inicial conhecido
-        var pecaId = await CriarPecaAsync(client,
-            nome: TestData.Nome("Vela de Ignição NGK EventBus"),
-            preco: 12.50m,
-            estoque: estoqueInicial,
-            unidade: "Unidade");
-
-        // 2. Criar cliente
-        var clienteId = await CriarClienteAsync(client,
-            nome: TestData.Nome("Ana EventBus"),
-            documento: TestData.Cpf(),
-            email: TestData.Email("ana.eventbus"),
-            telefone: "31999990020");
-
-        // 3. Criar veículo
-        var veiculoId = await CriarVeiculoAsync(client,
-            placa: TestData.PlacaMercosul(),
-            modelo: "Gol",
-            marca: "Volkswagen",
-            ano: 2019,
-            clienteId: clienteId);
-
-        // 4. Criar serviço no catálogo (obrigatório para RegistrarDiagnostico)
-        var servicoId = await CriarServicoAsync(client,
-            nome: TestData.Nome("Troca de Velas"),
-            preco: 80.00m);
-
-        // ──────────────────────────────────────────────────────────────
-        // ACT — executar o fluxo até RegistrarDiagnostico
-        // ──────────────────────────────────────────────────────────────
-
-        // 5. Criar OS
-        var osResponse = await client.PostAsJsonAsync("/api/v1/ordens-servico", new
-        {
-            ClienteId = clienteId,
-            VeiculoId = veiculoId
-        });
-        osResponse.EnsureSuccessStatusCode();
-        var os = await osResponse.Content.ReadFromJsonAsync<IdDto>(JsonOptions);
-        var osId = os!.Id;
-
-        // 6. Iniciar Diagnóstico
-        var iniciarResponse = await client.PatchAsync(
-            $"/api/v1/ordens-servico/{osId}/iniciar-diagnostico", EmptyJsonContent());
-        iniciarResponse.EnsureSuccessStatusCode();
-
-        // 7. Registrar Diagnóstico — este é o passo que dispara o integration event
-        //    O handler DecrementarEstoqueQuandoOrcamentoGerado vai decrementar o estoque
-        var registrarBody = new
-        {
-            DescricaoDiagnostico = "Velas com desgaste excessivo. Substituir todas.",
-            Servicos = new[] { new { ServicoId = servicoId, Quantidade = 1 } },
-            Pecas = new[] { new { PecaInsumoId = pecaId, Quantidade = quantidadeUsada } }
-        };
-
-        var registrarResponse = await client.PatchAsJsonAsync(
-            $"/api/v1/ordens-servico/{osId}/registrar-diagnostico", registrarBody);
-        Assert.Equal(HttpStatusCode.OK, registrarResponse.StatusCode);
-
-        // ──────────────────────────────────────────────────────────────
-        // ASSERT — verificar que o estoque foi decrementado no banco
-        // ──────────────────────────────────────────────────────────────
-
-        // O integration event é processado de forma síncrona (InMemoryIntegrationEventBus)
-        // durante o mesmo request — não é necessário aguardar
-        var pecaResponse = await client.GetAsync($"/api/v1/pecas-insumos/{pecaId}");
-        Assert.Equal(HttpStatusCode.OK, pecaResponse.StatusCode);
-
-        var peca = await pecaResponse.Content.ReadFromJsonAsync<PecaDto>(JsonOptions);
-        Assert.NotNull(peca);
-        Assert.Equal(estoqueEsperadoApos, peca.QuantidadeEmEstoque);
-    }
-
-    [Fact(DisplayName = "OrcamentoRejeitado → estoque é estornado via integration event")]
-    public async Task RejeitarOrcamento_DeveEstornarEstoque_ViaIntegrationEvent()
-    {
-        // ──────────────────────────────────────────────────────────────
         // ARRANGE
-        // ──────────────────────────────────────────────────────────────
-
         var token = await _factory.GetAuthTokenAsync();
         using var client = _factory.CreateAuthenticatedClient(token);
+        const int quantidadeUsada = 3;
 
-        const int estoqueInicial = 20;
-        const int quantidadeUsada = 5;
+        var pecaId = _factory.ServicosExternos.AdicionarPeca(
+            nome: TestData.Nome("Vela de Ignição NGK EventBus"), preco: 12.50m, estoque: 10, unidade: "Unidade");
+        var clienteId = _factory.ServicosExternos.AdicionarCliente(
+            nome: TestData.Nome("Ana EventBus"), email: TestData.Email("ana.eventbus"));
+        var veiculoId = _factory.ServicosExternos.AdicionarVeiculo(
+            placa: TestData.PlacaMercosul(), clienteId: clienteId);
+        var servicoId = _factory.ServicosExternos.AdicionarServico(
+            nome: TestData.Nome("Troca de Velas"), preco: 80.00m);
 
-        // 1. Criar peça com estoque conhecido
-        var pecaId = await CriarPecaAsync(client,
-            nome: TestData.Nome("Correia Dentada Gates EventBus"),
-            preco: 95.00m,
-            estoque: estoqueInicial,
-            unidade: "Unidade");
-
-        // 2. Pré-requisitos — CPF gerado por TestData, inédito a cada execução
-        var clienteId = await CriarClienteAsync(client,
-            nome: TestData.Nome("Bruno Rejeicao"),
-            documento: TestData.Cpf(),
-            email: TestData.Email("bruno.rejeicao"),
-            telefone: "31999990030");
-
-        var veiculoId = await CriarVeiculoAsync(client,
-            placa: TestData.PlacaMercosul(),
-            modelo: "Sandero",
-            marca: "Renault",
-            ano: 2018,
-            clienteId: clienteId);
-
-        var servicoId = await CriarServicoAsync(client,
-            nome: TestData.Nome("Troca de Correia Dentada"),
-            preco: 200.00m);
-
-        // ──────────────────────────────────────────────────────────────
-        // ACT — fluxo até registrar + rejeitar
-        // ──────────────────────────────────────────────────────────────
-
-        // Criar OS
-        var osResponse = await client.PostAsJsonAsync("/api/v1/ordens-servico", new
-        {
-            ClienteId = clienteId,
-            VeiculoId = veiculoId
-        });
-        osResponse.EnsureSuccessStatusCode();
-        var osId = (await osResponse.Content.ReadFromJsonAsync<IdDto>(JsonOptions))!.Id;
-
-        // Iniciar Diagnóstico
+        var osId = await CriarOrdemServicoAsync(client, clienteId, veiculoId);
         (await client.PatchAsync($"/api/v1/ordens-servico/{osId}/iniciar-diagnostico", EmptyJsonContent()))
             .EnsureSuccessStatusCode();
 
-        // Registrar Diagnóstico → decrementa estoque (20 - 5 = 15)
-        var registrarBody = new
+        // ACT — registrar o diagnóstico gera o orçamento e, após o commit, publica o evento
+        var registrarResponse = await client.PatchAsJsonAsync(
+            $"/api/v1/ordens-servico/{osId}/registrar-diagnostico", new
+            {
+                DescricaoDiagnostico = "Velas com desgaste excessivo. Substituir todas.",
+                Servicos = new[] { new { ServicoId = servicoId, Quantidade = 1 } },
+                Pecas = new[] { new { PecaInsumoId = pecaId, Quantidade = quantidadeUsada } }
+            });
+        Assert.Equal(HttpStatusCode.OK, registrarResponse.StatusCode);
+
+        // ASSERT
+        var harness = _factory.CriarHarness();
+        Assert.True(await harness.Published.Any<OrcamentoGeradoIntegrationEvent>(
+            x => x.Context.Message.OrdemServicoId == osId));
+
+        var evento = harness.Published.Select<OrcamentoGeradoIntegrationEvent>(
+            x => x.Context.Message.OrdemServicoId == osId).Single().Context.Message;
+        Assert.NotEqual(Guid.Empty, evento.EventId);
+        Assert.NotEqual(Guid.Empty, evento.OrcamentoId);
+        var peca = Assert.Single(evento.Pecas);
+        Assert.Equal(pecaId, peca.PecaInsumoId);
+        Assert.Equal(quantidadeUsada, peca.Quantidade);
+    }
+
+    [Fact(DisplayName = "RejeitarOrcamento → publica OrcamentoRejeitado com as peças do orçamento")]
+    public async Task RejeitarOrcamento_DevePublicarOrcamentoRejeitado()
+    {
+        // ARRANGE
+        var token = await _factory.GetAuthTokenAsync();
+        using var client = _factory.CreateAuthenticatedClient(token);
+        const int quantidadeUsada = 5;
+
+        var pecaId = _factory.ServicosExternos.AdicionarPeca(
+            nome: TestData.Nome("Correia Dentada Gates EventBus"), preco: 95.00m, estoque: 20, unidade: "Unidade");
+        var clienteId = _factory.ServicosExternos.AdicionarCliente(
+            nome: TestData.Nome("Bruno Rejeicao"), email: TestData.Email("bruno.rejeicao"));
+        var veiculoId = _factory.ServicosExternos.AdicionarVeiculo(
+            placa: TestData.PlacaMercosul(), clienteId: clienteId);
+        var servicoId = _factory.ServicosExternos.AdicionarServico(
+            nome: TestData.Nome("Troca de Correia Dentada"), preco: 200.00m);
+
+        var osId = await CriarOrdemServicoAsync(client, clienteId, veiculoId);
+        (await client.PatchAsync($"/api/v1/ordens-servico/{osId}/iniciar-diagnostico", EmptyJsonContent()))
+            .EnsureSuccessStatusCode();
+        (await client.PatchAsJsonAsync($"/api/v1/ordens-servico/{osId}/registrar-diagnostico", new
         {
             DescricaoDiagnostico = "Correia dentada com risco de ruptura.",
             Servicos = new[] { new { ServicoId = servicoId, Quantidade = 1 } },
             Pecas = new[] { new { PecaInsumoId = pecaId, Quantidade = quantidadeUsada } }
-        };
+        })).EnsureSuccessStatusCode();
 
-        (await client.PatchAsJsonAsync(
-            $"/api/v1/ordens-servico/{osId}/registrar-diagnostico", registrarBody))
-            .EnsureSuccessStatusCode();
+        var harness = _factory.CriarHarness();
+        Assert.False(await harness.Published.Any<OrcamentoRejeitadoIntegrationEvent>(
+            x => x.Context.Message.OrdemServicoId == osId));
 
-        // Verificar que o estoque foi decrementado para 15
-        var pecaAposDecremento = await ObterPecaAsync(client, pecaId);
-        Assert.Equal(estoqueInicial - quantidadeUsada, pecaAposDecremento.QuantidadeEmEstoque); // 15
-
-        // Rejeitar Orçamento → deve estornar o estoque (15 + 5 = 20)
-        // Rota exige papel Cliente (RFC-001 §4.2) — usa um client autenticado como o dono da OS
+        // ACT — rota exige papel Cliente (RFC-001 §4.2): client autenticado como o dono da OS
         using var clienteClient = _factory.CreateClienteAuthenticatedClient(clienteId);
         (await clienteClient.PatchAsync(
             $"/api/v1/ordens-servico/{osId}/rejeitar-orcamento", EmptyJsonContent()))
             .EnsureSuccessStatusCode();
 
-        // ──────────────────────────────────────────────────────────────
-        // ASSERT — estoque deve ter voltado ao valor inicial
-        // ──────────────────────────────────────────────────────────────
+        // ASSERT
+        Assert.True(await harness.Published.Any<OrcamentoRejeitadoIntegrationEvent>(
+            x => x.Context.Message.OrdemServicoId == osId));
 
-        var pecaAposEstorno = await ObterPecaAsync(client, pecaId);
-        Assert.Equal(estoqueInicial, pecaAposEstorno.QuantidadeEmEstoque); // 20 novamente
+        var evento = harness.Published.Select<OrcamentoRejeitadoIntegrationEvent>(
+            x => x.Context.Message.OrdemServicoId == osId).Single().Context.Message;
+        var peca = Assert.Single(evento.Pecas);
+        Assert.Equal(pecaId, peca.PecaInsumoId);
+        Assert.Equal(quantidadeUsada, peca.Quantidade);
     }
 
-    // ── Helpers privados ──
-
-    private async Task<PecaDto> ObterPecaAsync(HttpClient client, Guid pecaId)
+    private static async Task<Guid> CriarOrdemServicoAsync(HttpClient client, Guid clienteId, Guid veiculoId)
     {
-        var response = await client.GetAsync($"/api/v1/pecas-insumos/{pecaId}");
-        response.EnsureSuccessStatusCode();
-        return (await response.Content.ReadFromJsonAsync<PecaDto>(JsonOptions))!;
-    }
-
-    private async Task<Guid> CriarPecaAsync(HttpClient client,
-        string nome, decimal preco, int estoque, string unidade)
-    {
-        var response = await client.PostAsJsonAsync("/api/v1/pecas-insumos", new
+        var response = await client.PostAsJsonAsync("/api/v1/ordens-servico", new
         {
-            Nome = nome,
-            Descricao = (string?)null,
-            Preco = preco,
-            QuantidadeEmEstoque = estoque,
-            UnidadeDeMedida = unidade
+            ClienteId = clienteId,
+            VeiculoId = veiculoId
         });
         response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<PecaIdDto>(JsonOptions);
-        return body!.PecaInsumoId;
+        var body = await response.Content.ReadFromJsonAsync<IdDto>(JsonOptions);
+        return body!.Id;
     }
 
-    private async Task<Guid> CriarClienteAsync(HttpClient client,
-        string nome, string documento, string email, string telefone)
-    {
-        var response = await client.PostAsJsonAsync("/api/v1/clientes", new
-        {
-            Nome = nome,
-            Documento = documento,
-            Email = email,
-            Telefone = telefone,
-            PessoaFisica = true
-        });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<ClienteIdDto>(JsonOptions);
-        return body!.ClienteId;
-    }
-
-    private async Task<Guid> CriarVeiculoAsync(HttpClient client,
-        string placa, string modelo, string marca, int ano, Guid clienteId)
-    {
-        var response = await client.PostAsJsonAsync("/api/v1/veiculos", new
-        {
-            Placa = placa,
-            Modelo = modelo,
-            Marca = marca,
-            Ano = ano,
-            ClienteId = clienteId
-        });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<VeiculoIdDto>(JsonOptions);
-        return body!.VeiculoId;
-    }
-
-    private async Task<Guid> CriarServicoAsync(HttpClient client, string nome, decimal preco)
-    {
-        var response = await client.PostAsJsonAsync("/api/v1/servicos", new
-        {
-            Nome = nome,
-            Descricao = (string?)null,
-            Preco = preco
-        });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<ServicoIdDto>(JsonOptions);
-        return body!.ServicoId;
-    }
-
-    // DTOs locais
     private sealed record IdDto(Guid Id);
-    private sealed record PecaIdDto(Guid PecaInsumoId);
-    private sealed record ClienteIdDto(Guid ClienteId);
-    private sealed record VeiculoIdDto(Guid VeiculoId);
-    private sealed record ServicoIdDto(Guid ServicoId);
-
-    private sealed record PecaDto(
-        Guid Id,
-        string Nome,
-        decimal PrecoUnitario,
-        int QuantidadeEmEstoque,
-        string UnidadeDeMedida,
-        bool Ativo);
 }

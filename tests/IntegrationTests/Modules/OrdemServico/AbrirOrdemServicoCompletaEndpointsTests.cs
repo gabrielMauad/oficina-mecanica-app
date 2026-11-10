@@ -3,6 +3,8 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using IntegrationTests.Infrastructure;
+using MassTransit.Testing;
+using OficinaMecanica.Contracts.IntegrationEvents;
 
 namespace IntegrationTests.Modules.OrdemServico;
 
@@ -28,37 +30,21 @@ public class AbrirOrdemServicoCompletaEndpointsTests
     // POST /api/v1/ordens-servico/completa
     // =========================================================================
 
-    [Fact(DisplayName = "POST /completa: cria OS direto em AguardandoAprovacao, com orçamento Enviado e estoque reservado")]
+    [Fact(DisplayName = "POST /completa: cria OS direto em AguardandoAprovacao, com orçamento Enviado e publica OrcamentoGerado")]
     public async Task AbrirCompleta_ComDadosValidos_CriaOsAguardandoAprovacaoComOrcamentoEnviado()
     {
         var token = await _factory.GetAuthTokenAsync();
         using var client = _factory.CreateAuthenticatedClient(token);
 
-        const int estoqueInicial = 10;
         const int quantidadeUsada = 3;
 
-        var clienteId = await CriarClienteAsync(client,
-            nome: TestData.Nome("Fluxo Completo Cliente"),
-            documento: TestData.Cpf(),
-            email: TestData.Email("fluxo.completo"),
-            telefone: "31999990050");
+        var clienteId = _factory.ServicosExternos.AdicionarCliente(nome: TestData.Nome("Fluxo Completo Cliente"), email: TestData.Email("fluxo.completo"));
 
-        var veiculoId = await CriarVeiculoAsync(client,
-            placa: TestData.PlacaMercosul(),
-            modelo: "Civic",
-            marca: "Honda",
-            ano: 2022,
-            clienteId: clienteId);
+        var veiculoId = _factory.ServicosExternos.AdicionarVeiculo(placa: TestData.PlacaMercosul(), clienteId: clienteId);
 
-        var servicoId = await CriarServicoAsync(client,
-            nome: TestData.Nome("Alinhamento e Balanceamento OS Completa"),
-            preco: 120.00m);
+        var servicoId = _factory.ServicosExternos.AdicionarServico(nome: TestData.Nome("Alinhamento e Balanceamento OS Completa"), preco: 120.00m);
 
-        var pecaId = await CriarPecaAsync(client,
-            nome: TestData.Nome("Pastilha de Freio Completa"),
-            preco: 60.00m,
-            estoque: estoqueInicial,
-            unidade: "Par");
+        var pecaId = _factory.ServicosExternos.AdicionarPeca(nome: TestData.Nome("Pastilha de Freio Completa"), preco: 60.00m, estoque: 10, unidade: "Par");
 
         // Act — abrir OS já com serviços e peças definidos
         var abrirResponse = await client.PostAsJsonAsync("/api/v1/ordens-servico/completa", new
@@ -89,9 +75,16 @@ public class AbrirOrdemServicoCompletaEndpointsTests
         Assert.NotEmpty(osCompleta.Orcamentos);
         Assert.Equal("Enviado", osCompleta.Orcamentos[0].Status);
 
-        // Peças reservadas via integration event (estoque decrementado)
-        var peca = await ObterPecaAsync(client, pecaId);
-        Assert.Equal(estoqueInicial - quantidadeUsada, peca.QuantidadeEmEstoque);
+        // O estoque é baixado pelo serviço PecasInsumos ao consumir o evento publicado pela OS
+        var harness = _factory.CriarHarness();
+        Assert.True(await harness.Published.Any<OrcamentoGeradoIntegrationEvent>(
+            x => x.Context.Message.OrdemServicoId == osId));
+
+        var evento = harness.Published.Select<OrcamentoGeradoIntegrationEvent>(
+            x => x.Context.Message.OrdemServicoId == osId).Single().Context.Message;
+        var peca = Assert.Single(evento.Pecas);
+        Assert.Equal(pecaId, peca.PecaInsumoId);
+        Assert.Equal(quantidadeUsada, peca.Quantidade);
     }
 
     [Fact(DisplayName = "POST /completa: OS aberta pelo fluxo novo reaproveita aprovar → executar → finalizar → concluir sem alterações")]
@@ -100,28 +93,13 @@ public class AbrirOrdemServicoCompletaEndpointsTests
         var token = await _factory.GetAuthTokenAsync();
         using var client = _factory.CreateAuthenticatedClient(token);
 
-        var clienteId = await CriarClienteAsync(client,
-            nome: TestData.Nome("Ciclo Completo Cliente"),
-            documento: TestData.Cpf(),
-            email: TestData.Email("ciclo.completo"),
-            telefone: "31999990060");
+        var clienteId = _factory.ServicosExternos.AdicionarCliente(nome: TestData.Nome("Ciclo Completo Cliente"), email: TestData.Email("ciclo.completo"));
 
-        var veiculoId = await CriarVeiculoAsync(client,
-            placa: TestData.PlacaMercosul(),
-            modelo: "HB20",
-            marca: "Hyundai",
-            ano: 2020,
-            clienteId: clienteId);
+        var veiculoId = _factory.ServicosExternos.AdicionarVeiculo(placa: TestData.PlacaMercosul(), clienteId: clienteId);
 
-        var servicoId = await CriarServicoAsync(client,
-            nome: TestData.Nome("Revisão de Freios Ciclo Completo OS"),
-            preco: 90.00m);
+        var servicoId = _factory.ServicosExternos.AdicionarServico(nome: TestData.Nome("Revisão de Freios Ciclo Completo OS"), preco: 90.00m);
 
-        var pecaId = await CriarPecaAsync(client,
-            nome: TestData.Nome("Disco de Freio Dianteiro"),
-            preco: 45.00m,
-            estoque: 5,
-            unidade: "Unidade");
+        var pecaId = _factory.ServicosExternos.AdicionarPeca(nome: TestData.Nome("Disco de Freio Dianteiro"), preco: 45.00m, estoque: 5, unidade: "Unidade");
 
         var abrirResponse = await client.PostAsJsonAsync("/api/v1/ordens-servico/completa", new
         {
@@ -166,21 +144,12 @@ public class AbrirOrdemServicoCompletaEndpointsTests
         var token = await _factory.GetAuthTokenAsync();
         using var client = _factory.CreateAuthenticatedClient(token);
 
-        var clienteId = await CriarClienteAsync(client,
-            nome: TestData.Nome("Acompanhamento Cliente"),
-            documento: TestData.Cpf(),
-            email: TestData.Email("acompanhamento"),
-            telefone: "31999990070");
+        var clienteId = _factory.ServicosExternos.AdicionarCliente(nome: TestData.Nome("Acompanhamento Cliente"), email: TestData.Email("acompanhamento"));
 
-        var veiculoId = await CriarVeiculoAsync(client,
-            placa: TestData.PlacaMercosul(),
-            modelo: "Onix",
-            marca: "Chevrolet",
-            ano: 2021,
-            clienteId: clienteId);
+        var veiculoId = _factory.ServicosExternos.AdicionarVeiculo(placa: TestData.PlacaMercosul(), clienteId: clienteId);
 
-        var servicoId = await CriarServicoAsync(client, nome: TestData.Nome("Revisão Acompanhamento"), preco: 70.00m);
-        var pecaId = await CriarPecaAsync(client, nome: TestData.Nome("Peça Acompanhamento"), preco: 30.00m, estoque: 20, unidade: "Unidade");
+        var servicoId = _factory.ServicosExternos.AdicionarServico(nome: TestData.Nome("Revisão Acompanhamento"), preco: 70.00m);
+        var pecaId = _factory.ServicosExternos.AdicionarPeca(nome: TestData.Nome("Peça Acompanhamento"), preco: 30.00m, estoque: 20, unidade: "Unidade");
 
         // OS 1: fica em Recebida
         var os1Id = await AbrirOsVaziaAsync(client, clienteId, veiculoId);
@@ -265,90 +234,11 @@ public class AbrirOrdemServicoCompletaEndpointsTests
         return os!;
     }
 
-    private async Task<PecaDto> ObterPecaAsync(HttpClient client, Guid pecaId)
-    {
-        var response = await client.GetAsync($"/api/v1/pecas-insumos/{pecaId}");
-        response.EnsureSuccessStatusCode();
-        return (await response.Content.ReadFromJsonAsync<PecaDto>(JsonOptions))!;
-    }
-
-    private async Task<Guid> CriarClienteAsync(HttpClient client,
-        string nome, string documento, string email, string telefone)
-    {
-        var response = await client.PostAsJsonAsync("/api/v1/clientes", new
-        {
-            Nome = nome,
-            Documento = documento,
-            Email = email,
-            Telefone = telefone,
-            PessoaFisica = true
-        });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<ClienteIdDto>(JsonOptions);
-        return body!.ClienteId;
-    }
-
-    private async Task<Guid> CriarVeiculoAsync(HttpClient client,
-        string placa, string modelo, string marca, int ano, Guid clienteId)
-    {
-        var response = await client.PostAsJsonAsync("/api/v1/veiculos", new
-        {
-            Placa = placa,
-            Modelo = modelo,
-            Marca = marca,
-            Ano = ano,
-            ClienteId = clienteId
-        });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<VeiculoIdDto>(JsonOptions);
-        return body!.VeiculoId;
-    }
-
-    private async Task<Guid> CriarServicoAsync(HttpClient client, string nome, decimal preco)
-    {
-        var response = await client.PostAsJsonAsync("/api/v1/servicos", new
-        {
-            Nome = nome,
-            Descricao = (string?)null,
-            Preco = preco
-        });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<ServicoIdDto>(JsonOptions);
-        return body!.ServicoId;
-    }
-
-    private async Task<Guid> CriarPecaAsync(HttpClient client,
-        string nome, decimal preco, int estoque, string unidade)
-    {
-        var response = await client.PostAsJsonAsync("/api/v1/pecas-insumos", new
-        {
-            Nome = nome,
-            Descricao = (string?)null,
-            Preco = preco,
-            QuantidadeEmEstoque = estoque,
-            UnidadeDeMedida = unidade
-        });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<PecaIdDto>(JsonOptions);
-        return body!.PecaInsumoId;
-    }
-
     // ── DTOs locais para desserialização ──
 
-    private sealed record ClienteIdDto(Guid ClienteId);
-    private sealed record VeiculoIdDto(Guid VeiculoId);
-    private sealed record ServicoIdDto(Guid ServicoId);
-    private sealed record PecaIdDto(Guid PecaInsumoId);
 
     private sealed record StatusDto(Guid Id, string Status);
 
-    private sealed record PecaDto(
-        Guid Id,
-        string Nome,
-        decimal PrecoUnitario,
-        int QuantidadeEmEstoque,
-        string UnidadeDeMedida,
-        bool Ativo);
 
     private sealed record OrdemServicoDto(
         Guid Id,
