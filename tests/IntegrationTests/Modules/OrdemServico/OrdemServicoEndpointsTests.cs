@@ -110,13 +110,11 @@ public class OrdemServicoEndpointsTests
         Assert.Equal("Aprovado", osAposAprovar.Orcamentos[0].Status);
         Assert.NotNull(osAposAprovar.Orcamentos[0].DataAprovacao);
 
-        // 9. Executar: AguardandoAprovacao → EmExecucao (requer orçamento Aprovado)
-        var executarResponse = await client.PatchAsync(
-            $"/api/v1/ordens-servico/{osId}/executar", EmptyJsonContent());
-        Assert.Equal(HttpStatusCode.OK, executarResponse.StatusCode);
-
-        var osAposExecutar = await executarResponse.Content.ReadFromJsonAsync<OrdemServicoDto>(JsonOptions);
-        Assert.Equal("EmExecucao", osAposExecutar!.Status);
+        // 9. Pagamento aprovado (evento do serviço Pagamento): AguardandoAprovacao → EmExecucao.
+        //    A rota PATCH /executar não existe mais.
+        await _factory.AprovarPagamentoEAguardarExecucaoAsync(client, osId);
+        var osAposExecutar = await ObterOsAsync(client, osId);
+        Assert.Equal("EmExecucao", osAposExecutar.Status);
 
         // 10. Finalizar: EmExecucao → Finalizada
         //     Handler NotificarClienteAoFinalizar preenche NotificadoEm de forma síncrona

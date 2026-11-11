@@ -2,10 +2,12 @@ using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using OficinaMecanica.Contracts.IntegrationEvents;
 using OrdensServico.Adapters.Controllers;
 using OrdensServico.Adapters.DataSources;
 using OrdensServico.Adapters.Gateways;
 using OrdensServico.Application.Gateways;
+using OrdensServico.Application.IntegrationEventHandlers;
 using OrdensServico.Application.Metrics;
 using OrdensServico.Application.Ordens.Commands.GerarOrdemServico;
 using OrdensServico.Application.Ordens.Queries.ListarOrdensParaAcompanhamento;
@@ -35,6 +37,11 @@ public static class OrdemServicoModule
 
         // Barramento de eventos de integração (MassTransit sobre SNS/SQS).
         services.AddMensageria(configuration);
+
+        // Handlers da Application que os consumers da Saga acionam.
+        services.AddScoped<IIntegrationEventHandler<PagamentoAprovadoIntegrationEvent>, ExecutarOrdemServicoQuandoPagamentoAprovado>();
+        services.AddScoped<IIntegrationEventHandler<PagamentoRecusadoIntegrationEvent>, RejeitarOrcamentoQuandoPagamentoRecusado>();
+        services.AddScoped<IIntegrationEventHandler<EstoqueBaixaFalhouIntegrationEvent>, RejeitarOrcamentoQuandoEstoqueBaixaFalhou>();
 
         #region DataSources (Repositórios EF)
 

@@ -87,7 +87,7 @@ public class AbrirOrdemServicoCompletaEndpointsTests
         Assert.Equal(quantidadeUsada, peca.Quantidade);
     }
 
-    [Fact(DisplayName = "POST /completa: OS aberta pelo fluxo novo reaproveita aprovar → executar → finalizar → concluir sem alterações")]
+    [Fact(DisplayName = "POST /completa: OS aberta pelo fluxo novo reaproveita aprovar → pagamento aprovado → finalizar → concluir sem alterações")]
     public async Task AbrirCompleta_SeguidoDoCicloDeVidaCompleto_FuncionaSemAlteracoes()
     {
         var token = await _factory.GetAuthTokenAsync();
@@ -117,9 +117,8 @@ public class AbrirOrdemServicoCompletaEndpointsTests
             $"/api/v1/ordens-servico/{osId}/aprovar-orcamento", EmptyJsonContent());
         Assert.Equal(HttpStatusCode.OK, aprovarResponse.StatusCode);
 
-        var executarResponse = await client.PatchAsync(
-            $"/api/v1/ordens-servico/{osId}/executar", EmptyJsonContent());
-        Assert.Equal(HttpStatusCode.OK, executarResponse.StatusCode);
+        // A execução começa pelo evento de pagamento aprovado (não há rota /executar)
+        await _factory.AprovarPagamentoEAguardarExecucaoAsync(client, osId);
 
         var finalizarResponse = await client.PatchAsync(
             $"/api/v1/ordens-servico/{osId}/finalizar", EmptyJsonContent());
@@ -184,7 +183,7 @@ public class AbrirOrdemServicoCompletaEndpointsTests
         // aprovar-orcamento exige papel Cliente (RFC-001 §4.2)
         using var clienteClient = _factory.CreateClienteAuthenticatedClient(clienteId);
         (await clienteClient.PatchAsync($"/api/v1/ordens-servico/{os4Id}/aprovar-orcamento", EmptyJsonContent())).EnsureSuccessStatusCode();
-        (await client.PatchAsync($"/api/v1/ordens-servico/{os4Id}/executar", EmptyJsonContent())).EnsureSuccessStatusCode();
+        await _factory.AprovarPagamentoEAguardarExecucaoAsync(client, os4Id);
         (await client.PatchAsync($"/api/v1/ordens-servico/{os4Id}/finalizar", EmptyJsonContent())).EnsureSuccessStatusCode();
         (await client.PatchAsync($"/api/v1/ordens-servico/{os4Id}/concluir", EmptyJsonContent())).EnsureSuccessStatusCode();
 

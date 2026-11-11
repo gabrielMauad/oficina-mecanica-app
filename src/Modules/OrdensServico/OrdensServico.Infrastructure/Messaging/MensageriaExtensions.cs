@@ -3,6 +3,7 @@ using Amazon.SQS;
 using MassTransit;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using OrdensServico.Infrastructure.Messaging.Consumers;
 using SharedKernel.Application;
 
 namespace OrdensServico.Infrastructure.Messaging;
@@ -31,6 +32,11 @@ public static class MensageriaExtensions
         services.AddMassTransit(x =>
         {
             x.SetEndpointNameFormatter(formatter);
+
+            // Consumers da Saga: reagem ao pagamento e à falha na baixa de estoque.
+            x.AddConsumer<PagamentoAprovadoConsumer>();
+            x.AddConsumer<PagamentoRecusadoConsumer>();
+            x.AddConsumer<EstoqueBaixaFalhouConsumer>();
 
             switch (options.Transporte)
             {

@@ -154,18 +154,6 @@ public class OrdemServicoApiController : ControllerBase
     }
 
     [Authorize(Roles = "Oficina")]
-    [HttpPatch("{id}/executar")]
-    public async Task<IActionResult> Executar(Guid id)
-    {
-        var result = await _caController.Executar(id);
-
-        if (result.IsFailure)
-            return UnprocessableEntity(result.Error);
-
-        return Ok(result.Value);
-    }
-
-    [Authorize(Roles = "Oficina")]
     [HttpPatch("{id}/finalizar")]
     public async Task<IActionResult> Finalizar(Guid id)
     {

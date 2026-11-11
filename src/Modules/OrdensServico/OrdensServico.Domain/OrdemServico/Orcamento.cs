@@ -62,4 +62,30 @@ public sealed class Orcamento : Entity<OrcamentoId>
         Status = StatusOrcamento.Rejeitado;
         return this;
     }
+
+    /// <summary>
+    /// Compensação do pagamento recusado: desfaz a aprovação (Aprovado → Rejeitado). É uma transição
+    /// própria; <see cref="Rejeitar"/> continua aceitando apenas orçamento Enviado.
+    /// </summary>
+    internal Result<Orcamento> RejeitarAposAprovacao()
+    {
+        if (Status != StatusOrcamento.Aprovado)
+            return Error.Validation("Orcamento.TransicaoInvalida", "Orçamento só pode ter a aprovação desfeita quando está Aprovado.");
+
+        Status = StatusOrcamento.Rejeitado;
+        return this;
+    }
+
+    /// <summary>
+    /// Falha na baixa de estoque: o orçamento ainda não concluiu o fluxo (Pendente, Enviado ou
+    /// Aprovado) e passa a Rejeitado.
+    /// </summary>
+    internal Result<Orcamento> RejeitarPorFalhaDeEstoque()
+    {
+        if (Status == StatusOrcamento.Rejeitado)
+            return Error.Validation("Orcamento.TransicaoInvalida", "Orçamento já está Rejeitado.");
+
+        Status = StatusOrcamento.Rejeitado;
+        return this;
+    }
 }

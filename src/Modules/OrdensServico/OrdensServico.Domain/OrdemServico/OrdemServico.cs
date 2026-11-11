@@ -226,6 +226,7 @@ public sealed class OrdemServico : AggregateRoot<OrdemServicoId>
             return resultado.Error;
 
         AtualizadoEm = DateTime.UtcNow;
+        AddDomainEvent(new OrcamentoAprovado(Id, orcamento.Id, ClienteId, orcamento.ValorTotal, DateTime.UtcNow));
         return this;
     }
 
@@ -248,6 +249,54 @@ public sealed class OrdemServico : AggregateRoot<OrdemServicoId>
 
         AtualizadoEm = DateTime.UtcNow;
         AddDomainEvent(new OrcamentoRejeitado(Id, orcamento.Id, pecasSnapshot, DateTime.UtcNow));
+        return this;
+    }
+
+    /// <summary>
+    /// Compensação do pagamento recusado: o orçamento Aprovado passa a Rejeitado e o evento
+    /// <see cref="OrcamentoRejeitado"/> leva as peças de volta ao estoque. A OS continua em
+    /// Aguardando Aprovação, apta a receber um novo diagnóstico.
+    /// </summary>
+    public Result<OrdemServico> RejeitarOrcamentoAprovadoPorPagamentoRecusado(OrcamentoId orcamentoId)
+    {
+        if (Status != StatusOrdemServico.AguardandoAprovacao)
+            return Error.Validation("OrdemServico.TransicaoInvalida", "Ordem de Serviço só pode desfazer a aprovação do orçamento quando está Aguardando Aprovação.");
+
+        var orcamento = _orcamentos.FirstOrDefault(x => x.Id == orcamentoId);
+        if (orcamento == null)
+            return Error.Validation("OrdemServico.OrcamentoNaoEncontrado", "Orçamento não encontrado nesta ordem de serviço.");
+
+        var resultado = orcamento.RejeitarAposAprovacao();
+        if (resultado.IsFailure)
+            return resultado.Error;
+
+        var pecasSnapshot = _itensPeca
+            .Select(x => new ItemPecaSnapshot(x.PecaInsumoId, x.Quantidade, x.PrecoUnitarioSnapshot))
+            .ToList();
+
+        AtualizadoEm = DateTime.UtcNow;
+        AddDomainEvent(new OrcamentoRejeitado(Id, orcamento.Id, pecasSnapshot, DateTime.UtcNow));
+        return this;
+    }
+
+    /// <summary>
+    /// Falha na baixa de estoque: o orçamento passa a Rejeitado sem registrar
+    /// <see cref="OrcamentoRejeitado"/>, pois nada foi baixado e não há o que estornar.
+    /// </summary>
+    public Result<OrdemServico> RejeitarOrcamentoPorFalhaNaBaixaDeEstoque(OrcamentoId orcamentoId)
+    {
+        if (Status != StatusOrdemServico.AguardandoAprovacao)
+            return Error.Validation("OrdemServico.TransicaoInvalida", "Ordem de Serviço só pode rejeitar o orçamento por falha de estoque quando está Aguardando Aprovação.");
+
+        var orcamento = _orcamentos.FirstOrDefault(x => x.Id == orcamentoId);
+        if (orcamento == null)
+            return Error.Validation("OrdemServico.OrcamentoNaoEncontrado", "Orçamento não encontrado nesta ordem de serviço.");
+
+        var resultado = orcamento.RejeitarPorFalhaDeEstoque();
+        if (resultado.IsFailure)
+            return resultado.Error;
+
+        AtualizadoEm = DateTime.UtcNow;
         return this;
     }
 

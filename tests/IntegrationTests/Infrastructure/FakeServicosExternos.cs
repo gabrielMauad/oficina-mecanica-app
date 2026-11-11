@@ -29,7 +29,26 @@ public sealed partial class FakeServicosExternos : HttpMessageHandler
     private readonly ConcurrentDictionary<Guid, Peca> _pecas = new();
     private readonly ConcurrentQueue<RequisicaoRecebida> _requisicoes = new();
 
+    // Clientes cujo Cadastro "cai" depois de N consultas bem-sucedidas: guarda quantas ainda passam.
+    private readonly ConcurrentDictionary<Guid, int> _consultasRestantesDoCliente = new();
+
     public IReadOnlyCollection<RequisicaoRecebida> Requisicoes => _requisicoes;
+
+    /// <summary>
+    /// Simula o Cadastro saindo do ar para o cliente: as primeiras <paramref name="consultasComSucesso"/>
+    /// consultas a <c>GET /api/v1/clientes/{id}</c> funcionam e as seguintes respondem 503. Permite
+    /// derrubar o Cadastro entre a validação da abertura e a montagem do e-mail do orçamento.
+    /// </summary>
+    public void SimularCadastroIndisponivelApos(Guid clienteId, int consultasComSucesso) =>
+        _consultasRestantesDoCliente[clienteId] = consultasComSucesso;
+
+    private bool CadastroIndisponivelPara(Guid clienteId)
+    {
+        if (!_consultasRestantesDoCliente.TryGetValue(clienteId, out _)) return false;
+
+        var restantes = _consultasRestantesDoCliente.AddOrUpdate(clienteId, 0, (_, atual) => atual - 1);
+        return restantes < 0;
+    }
 
     public Guid AdicionarCliente(string nome, string email, bool ativo = true)
     {
@@ -72,11 +91,16 @@ public sealed partial class FakeServicosExternos : HttpMessageHandler
         var caminho = uri.AbsolutePath;
 
         if (ClientePorId().Match(caminho) is { Success: true } mCliente)
+        {
+            if (CadastroIndisponivelPara(IdDe(mCliente)))
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+
             return Responder(_clientes.GetValueOrDefault(IdDe(mCliente)), c => new
             {
                 c.Id, c.Nome, Documento = "00000000000", c.Email, Telefone = "31999990000", c.Ativo,
                 CadastradoEm = DateTime.UtcNow, AtualizadoEm = DateTime.UtcNow
             });
+        }
 
         if (VeiculoPorId().Match(caminho) is { Success: true } mVeiculo)
             return Responder(_veiculos.GetValueOrDefault(IdDe(mVeiculo)), v => new
