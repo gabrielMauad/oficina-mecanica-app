@@ -264,7 +264,7 @@ jobs:
           echo "Endpoint resolvido: $API_ENDPOINT"
 
           for i in $(seq 1 30); do
-            HTTP_STATUS=$(curl -sS --max-time 15 -o /tmp/healthz.json -w "%{http_code}" "$API_ENDPOINT/ordens-servico/healthz/ready" || echo "000")
+            HTTP_STATUS=$(curl -sS --max-time 15 -o /tmp/healthz.json -w "%{http_code}" "$API_ENDPOINT/ordens-servico/healthz/ready" || true)
             if [ "$HTTP_STATUS" == "200" ]; then
               echo "OK: /ordens-servico/healthz/ready respondeu 200"
               cat /tmp/healthz.json; echo

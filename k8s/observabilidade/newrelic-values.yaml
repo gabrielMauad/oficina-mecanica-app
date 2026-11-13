@@ -33,9 +33,9 @@
 #     1 replica) 80m / 128Mi; kube-state-metrics (1 replica) 50m / 64Mi. Com 3 nos: 580m / 942Mi.
 #   - sistema: aws-node, kube-proxy, coredns x2, metrics-server x2: ~775m / ~540Mi no total.
 #   - aplicacao: 5 servicos x 3 replicas x (100m / 256Mi) = 1500m / 3840Mi no pico do HPA.
-#   - total no pico: ~2855m de ~5790m de CPU (~49%) e ~5,2 GiB de ~9,7 GiB de memoria (~54%).
-#   - pods: 15 da aplicacao + 11 de sistema + 4 do bundle = ~30 de 51 (17 pods/no no t3.medium).
-# Com o node group no minimo (2 nos) o pico ainda cabe: ~67% de CPU, ~77% de memoria e 27 pods
+#   - total no pico: ~2855m de ~5790m de CPU (~49%) e ~5,2 GiB de ~9,9 GiB de memoria (~53%).
+#   - pods: 15 da aplicacao + 10 de sistema + 5 do bundle = ~30 de 51 (17 pods/no no t3.medium).
+# Com o node group no minimo (2 nos) o pico ainda cabe: ~67% de CPU, ~75% de memoria e 27 pods
 # de 34. Nenhum dos tres recursos e o limite: ha folga para todos os servicos escalarem ao teto.
 
 global:

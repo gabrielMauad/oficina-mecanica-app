@@ -24,14 +24,11 @@ data:
   Jwt__ValidIssuers__1: "oficina-mecanica-auth"
   OpenApi__Enabled: "true"
   # Mensageria (MassTransit sobre SNS/SQS). Na AWS as credenciais vem da cadeia padrao do SDK
-  # (role do no do EKS) e nao ha endpoint customizado: ServiceUrl, AccessKey e SecretKey ficam
-  # vazios - so o ambiente local (LocalStack) os preenche. Topicos, filas e assinaturas sao
+  # (role do no do EKS) e nao ha endpoint customizado: ServiceUrl, AccessKey e SecretKey nao sao
+  # definidos - so o ambiente local (LocalStack) os preenche. Topicos, filas e assinaturas sao
   # criados pelo proprio MassTransit na subida do servico.
   Mensageria__Transporte: "AmazonSqs"
   Mensageria__Regiao: "us-east-1"
-  Mensageria__ServiceUrl: ""
-  Mensageria__AccessKey: ""
-  Mensageria__SecretKey: ""
   # Servicos consultados por HTTP, pelo DNS interno do cluster (Service na porta 80 -> container
   # 8080). O Authorization da requisicao de entrada e repassado a eles pelo proprio servico.
   Servicos__Cadastro__BaseUrl: "http://cadastro.oficina-mecanica.svc.cluster.local"
