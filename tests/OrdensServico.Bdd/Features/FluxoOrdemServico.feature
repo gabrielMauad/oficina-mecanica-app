@@ -65,6 +65,7 @@ Funcionalidade: Fluxo completo da ordem de serviço e compensações da Saga
     Quando chega o evento PagamentoAprovado do primeiro orçamento, já rejeitado
     Então o evento foi consumido sem erro
     E a ordem de serviço está "AguardandoAprovacao"
+    E o orçamento está "Aprovado"
 
   Cenário: Rejeição pelo cliente publica OrcamentoRejeitado para o estorno das peças
     Dado que a oficina abriu a ordem de serviço completa com 1 serviço e 4 unidades da peça

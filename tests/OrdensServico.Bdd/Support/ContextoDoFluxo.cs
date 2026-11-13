@@ -20,5 +20,6 @@ public sealed class ContextoDoFluxo : IDisposable
 
     public HttpClient Oficina { get; set; } = null!;
 
+    // O Reqnroll descarta os objetos IDisposable injetados por contexto ao fim de cada cenário.
     public void Dispose() => Oficina?.Dispose();
 }

@@ -253,15 +253,27 @@ public sealed class FluxoOrdemServicoSteps
     }
 
     [Then("nenhum evento OrcamentoRejeitado foi publicado")]
-    public async Task EntaoNenhumOrcamentoRejeitadoPublicado() =>
-        Assert.False(await Factory.CriarHarness().Published.Any<OrcamentoRejeitadoIntegrationEvent>(
-            x => x.Context.Message.OrdemServicoId == _ctx.OsId));
+    public async Task EntaoNenhumOrcamentoRejeitadoPublicado()
+    {
+        var harness = Factory.CriarHarness();
+
+        // A ausência só é determinística depois que o consumidor terminou: o OrcamentoRejeitado seria
+        // publicado dentro dele, então, após o Consumed do último evento recebido, a checagem abaixo
+        // (sem espera) não depende do tempo de inatividade do harness.
+        await AguardarConsumoDoUltimoEventoAsync(harness);
+
+        Assert.False(harness.Published.Select<OrcamentoRejeitadoIntegrationEvent>(
+            x => x.Context.Message.OrdemServicoId == _ctx.OsId
+              && x.Context.Message.OrcamentoId == _ctx.OrcamentoAtualId).Any());
+    }
 
     [Then("o evento foi consumido sem erro")]
-    public async Task EntaoEventoConsumidoSemErro()
+    public async Task EntaoEventoConsumidoSemErro() =>
+        await AguardarConsumoDoUltimoEventoAsync(Factory.CriarHarness());
+
+    private async Task AguardarConsumoDoUltimoEventoAsync(ITestHarness harness)
     {
         var evento = _ultimoEventoRecebido ?? throw new InvalidOperationException("Nenhum evento foi enviado.");
-        var harness = Factory.CriarHarness();
 
         // Consumed.Select<T> exige o tipo concreto: despacha pelo tipo do evento enviado.
         switch (evento)

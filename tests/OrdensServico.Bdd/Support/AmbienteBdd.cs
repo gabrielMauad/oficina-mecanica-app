@@ -1,6 +1,8 @@
 using IntegrationTests.Infrastructure;
 using Reqnroll;
 
+// Um único host e um único banco são compartilhados por todos os cenários; o harness do MassTransit
+// é global ao host, então os cenários rodam em sequência para que um não observe as mensagens do outro.
 [assembly: CollectionBehavior(DisableTestParallelization = true)]
 
 namespace OrdensServico.Bdd.Support;
