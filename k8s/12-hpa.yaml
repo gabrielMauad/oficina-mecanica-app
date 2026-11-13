@@ -1,17 +1,20 @@
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: oficina-api-hpa
+  name: ordens-servico-hpa
   namespace: oficina-mecanica
   labels:
+    app: ordens-servico
     app.kubernetes.io/part-of: oficina-mecanica
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: oficina-api
+    name: ordens-servico
+  # Maximo de 3 replicas por servico: o node group do cluster e dimensionado para os cinco
+  # servicos escalando ate esse teto.
   minReplicas: 1
-  maxReplicas: 5
+  maxReplicas: 3
   metrics:
     - type: Resource
       resource:

@@ -1,39 +1,46 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: oficina-api
+  name: ordens-servico
   namespace: oficina-mecanica
   labels:
-    app: oficina-api
+    app: ordens-servico
     app.kubernetes.io/part-of: oficina-mecanica
 spec:
-  replicas: 1                
+  # Com HPA ativo, o numero de replicas passa a ser decidido por ele (12-hpa.yaml); este valor
+  # so vale ate o primeiro ciclo do autoscaler.
+  replicas: 1
   selector:
     matchLabels:
-      app: oficina-api
+      app: ordens-servico
   template:
     metadata:
       labels:
-        app: oficina-api
+        app: ordens-servico
     spec:
       containers:
-        - name: api
-          image: IMAGE_PLACEHOLDER        
+        - name: ordens-servico
+          # Substituido pela pipeline pela URI do ECR com a tag = SHA do commit.
+          image: IMAGE_PLACEHOLDER
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
+          # ConfigMap = chaves nao sensiveis; Secret ordens-servico-secrets = connection string, segredo
+          # JWT e header OTLP, criado pela pipeline a partir do Secrets Manager.
           envFrom:
             - configMapRef:
-                name: oficina-config
+                name: ordens-servico-config
             - secretRef:
-                name: oficina-secrets
+                name: ordens-servico-secrets
           resources:
             requests:
-              cpu: "100m"                
+              cpu: "100m"
               memory: "256Mi"
             limits:
               cpu: "500m"
               memory: "512Mi"
+          # Liveness e startup so olham o processo; readiness inclui o PostgreSQL. Assim, banco
+          # indisponivel tira o pod do balanceamento sem reinicia-lo.
           startupProbe:
             httpGet:
               path: /healthz/live

@@ -5,37 +5,118 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+# O workflow so le o codigo: nenhum passo escreve no repositorio nem em PRs (a publicacao vai para
+# o ECR e o EKS, autenticada pelas credenciais AWS dos secrets do environment).
+permissions:
+  contents: read
+
+# Um deploy por vez por branch: se outro push chegar durante um deploy em andamento, ele espera
+# na fila em vez de rodar em paralelo (dois "kubectl apply" simultaneos disputariam o mesmo
+# Deployment). Nunca cancela o deploy em andamento, para nao deixar o rollout pela metade.
+concurrency:
+  group: deploy-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   AWS_REGION: us-east-1
   EKS_CLUSTER_NAME: oficina-mecanica
-  ECR_REPOSITORY: oficina-mecanica-api
+  API_GATEWAY_NAME: oficina-mecanica-api
+  ECR_REPOSITORY: oficina-mecanica-ordens-servico
+  SOLUTION: OficinaMecanica.slnx
 
 jobs:
+  # Build, testes com cobertura e analise estatica no SonarCloud. O scanner precisa observar o
+  # build, por isso a ordem e restore -> sonarscanner begin -> build -> test -> sonarscanner end.
+  # Ainda nao ha quality gate bloqueante: o resultado e publicado no SonarCloud, mas a pipeline
+  # nao espera nem falha pelo veredito do gate.
+  #
+  # A analise do SonarCloud e opcional: sem o secret SONAR_TOKEN e as variables SONAR_PROJECT_KEY e
+  # SONAR_ORGANIZATION, restore, build, testes e cobertura rodam normalmente e apenas a analise e
+  # ignorada.
   build-test:
     name: Build & Test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Historico completo: o SonarCloud usa o blame do git para atribuir codigo novo/antigo.
+          fetch-depth: 0
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
 
+      # Decide uma unica vez se a analise do Sonar roda; os passos do Sonar abaixo dependem de
+      # steps.sonar.outputs.enabled. O token so e entregue a este passo e aos passos do Sonar, via
+      # env - nunca ao restante do job.
+      - name: Detectar configuracao do SonarCloud
+        id: sonar
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
+          SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
+        run: |
+          if [ -n "$SONAR_TOKEN" ] && [ -n "$SONAR_PROJECT_KEY" ] && [ -n "$SONAR_ORGANIZATION" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::SonarCloud nao configurado (secret SONAR_TOKEN e/ou variables SONAR_PROJECT_KEY/SONAR_ORGANIZATION ausentes): analise ignorada; build, testes e cobertura seguem normalmente."
+          fi
+
+      # O scanner do Sonar roda em Java; o runner ubuntu-latest nao garante a versao exigida.
+      - name: Setup Java 17
+        if: steps.sonar.outputs.enabled == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # Versao fixa para que o scanner nao mude sozinho entre execucoes.
+      - name: Instalar dotnet-sonarscanner
+        if: steps.sonar.outputs.enabled == 'true'
+        run: dotnet tool install --global dotnet-sonarscanner --version 12.1.0
+
       - name: Restore
-        run: dotnet restore OficinaMecanica.slnx
+        run: dotnet restore "${{ env.SOLUTION }}"
+
+      # O token entra por variavel de ambiente (e nao interpolado no script) para nao aparecer na
+      # linha de comando exibida no log. Migrations (codigo gerado) e Program.cs (composicao do
+      # host, coberto apenas pelos testes de integracao) ficam fora do calculo de cobertura.
+      - name: SonarCloud - begin
+        if: steps.sonar.outputs.enabled == 'true'
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          dotnet sonarscanner begin \
+            /k:"${{ vars.SONAR_PROJECT_KEY }}" \
+            /o:"${{ vars.SONAR_ORGANIZATION }}" \
+            /d:sonar.token="$SONAR_TOKEN" \
+            /d:sonar.host.url="https://sonarcloud.io" \
+            /d:sonar.cs.opencover.reportsPaths="**/coverage.opencover.xml" \
+            /d:sonar.coverage.exclusions="**/Migrations/**,**/Program.cs"
 
       - name: Build
-        run: dotnet build OficinaMecanica.slnx --no-restore --configuration Release
+        run: dotnet build "${{ env.SOLUTION }}" --no-restore --configuration Release
 
-      - name: Test
-        run: dotnet test OficinaMecanica.slnx --no-build --configuration Release --verbosity normal
+      # Cada projeto de teste gera seu coverage.opencover.xml em TestResults/; o Sonar consolida
+      # todos pelo padrao "**/coverage.opencover.xml" configurado acima.
+      - name: Test (com cobertura)
+        run: |
+          dotnet test "${{ env.SOLUTION }}" --no-build --configuration Release --verbosity normal \
+            --collect "XPlat Code Coverage;Format=opencover"
 
-  # A conta e uma AWS Academy Learner Lab - nao permite IAM role/OIDC (ADR-006), entao autentica
-  # com as tres credenciais de sessao temporarias, renovadas manualmente a cada sessao do
-  # laboratorio. A URL do repositorio ECR e resolvida em runtime (describe-repositories), nunca
-  # com a conta gravada em codigo - ela muda a cada recriacao da infraestrutura (infra-k8s).
+      - name: SonarCloud - end
+        if: steps.sonar.outputs.enabled == 'true'
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
+
+  # A conta e uma AWS Academy Learner Lab - nao permite IAM role/OIDC, entao autentica com as
+  # tres credenciais de sessao temporarias, renovadas manualmente a cada sessao do laboratorio.
+  # A URL do repositorio ECR e resolvida em runtime (describe-repositories), nunca com a conta
+  # gravada em codigo - ela muda a cada recriacao da infraestrutura (oficina-mecanica-infra-k8s).
   docker-image:
     name: Build & Push image (ECR)
     needs: build-test
@@ -75,7 +156,10 @@ jobs:
           tags: ${{ steps.image.outputs.uri }}
 
   # Aplica os manifestos de k8s/ contra o cluster EKS persistente (oficina-mecanica-infra-k8s) -
-  # este workflow nao cria infraestrutura nenhuma, so publica a aplicacao nela.
+  # este workflow nao cria infraestrutura nenhuma, so publica este servico nela. Alem do servico,
+  # esta e a unica pipeline que instala o monitoramento do cluster (nri-bundle, New Relic): as
+  # metricas de CPU/memoria de node e pod sao do cluster inteiro, nao de um servico, e os demais
+  # servicos so enviam seus sinais por OTLP.
   deploy:
     name: Deploy no EKS
     needs: docker-image
@@ -97,33 +181,40 @@ jobs:
         run: aws eks update-kubeconfig --name "${{ env.EKS_CLUSTER_NAME }}" --region "${{ env.AWS_REGION }}"
 
       - name: Namespace
-        run: kubectl apply -f k8s/base/00-namespace.yaml
+        run: kubectl apply -f k8s/00-namespace.yaml
 
-      # Le os segredos do RDS e da aplicacao por NOME (nunca ARN - o ARN muda a cada recriacao),
-      # monta o Secret do Kubernetes em runtime e aplica de forma idempotente. Nenhum valor e
-      # impresso no log: cada um recebe ::add-mask:: antes de qualquer outro uso.
+      # Le os segredos do RDS deste servico e da aplicacao por NOME (nunca ARN - o ARN muda a cada
+      # recriacao), monta o Secret do Kubernetes em runtime e aplica de forma idempotente. Nenhum
+      # valor secreto e impresso no log: cada um recebe ::add-mask:: antes de qualquer outro uso.
       #
-      # A license key da New Relic (RFC-004, secao 6.2) NAO vem do Secrets Manager - e um dado de
-      # conta de terceiro, nao um recurso da AWS - e sim direto de um secret do GitHub
-      # (NEW_RELIC_LICENSE_KEY) para o Secret do Kubernetes, sem operador adicional nem IRSA.
-      - name: Criar/atualizar Secret oficina-secrets
+      # A license key da New Relic NAO vem do Secrets Manager - e um dado de conta de terceiro, nao
+      # um recurso da AWS - e sim direto de um secret do GitHub (NEW_RELIC_LICENSE_KEY) para o
+      # Secret do Kubernetes, sem operador adicional nem IRSA.
+      - name: Criar/atualizar Secret ordens-servico-secrets
         env:
           NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
         run: |
+          # A license key e obrigatoria: sem ela os pods subiriam sem enviar telemetria.
+          [ -n "$NEW_RELIC_LICENSE_KEY" ] || { echo "::error::secret NEW_RELIC_LICENSE_KEY ausente"; exit 1; }
+
           RDS_SECRET=$(aws secretsmanager get-secret-value \
-            --secret-id oficina-mecanica/dev/rds/postgresql --query SecretString --output text)
+            --secret-id oficina-mecanica/dev/rds/ordens-servico --query SecretString --output text)
           APP_SECRET=$(aws secretsmanager get-secret-value \
             --secret-id oficina-mecanica/dev/app --query SecretString --output text)
 
-          DB_HOST=$(echo "$RDS_SECRET" | jq -r .host)
-          DB_PORT=$(echo "$RDS_SECRET" | jq -r .port)
-          DB_NAME=$(echo "$RDS_SECRET" | jq -r .dbname)
-          DB_USER=$(echo "$RDS_SECRET" | jq -r .username)
-          DB_PASSWORD=$(echo "$RDS_SECRET" | jq -r .password)
-          JWT_SECRET=$(echo "$APP_SECRET" | jq -r .jwt_secret)
-          ADMIN_SENHA=$(echo "$APP_SECRET" | jq -r .admin_senha)
+          DB_HOST=$(echo "$RDS_SECRET" | jq -er .host)
+          DB_PORT=$(echo "$RDS_SECRET" | jq -er .port)
+          DB_NAME=$(echo "$RDS_SECRET" | jq -er .dbname)
+          DB_USER=$(echo "$RDS_SECRET" | jq -er .username)
+          DB_PASSWORD=$(echo "$RDS_SECRET" | jq -er .password)
+          JWT_SECRET=$(echo "$APP_SECRET" | jq -er .jwt_secret)
 
-          for v in "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$DB_PASSWORD" "$JWT_SECRET" "$ADMIN_SENHA" "$NEW_RELIC_LICENSE_KEY"; do
+          # Mascara apenas o que e segredo. DB_HOST, DB_PORT, DB_NAME e DB_USER ficam de fora de
+          # proposito: sao identificadores, nao credenciais, e mascara-los trocaria por "***"
+          # qualquer trecho do log que contenha o mesmo texto (a porta, "ordens_servico", "oficina" em
+          # nomes de recursos do kubectl, no smoke test etc.), tornando o log ilegivel. Os valores
+          # derivados que embutem segredo (connection string e header OTLP) sao mascarados abaixo.
+          for v in "$DB_PASSWORD" "$JWT_SECRET" "$NEW_RELIC_LICENSE_KEY"; do
             echo "::add-mask::$v"
           done
 
@@ -132,49 +223,50 @@ jobs:
           CONNECTION_STRING="Host=${DB_HOST};Port=${DB_PORT};Database=${DB_NAME};Username=${DB_USER};Password=${DB_PASSWORD};SSL Mode=Require"
           echo "::add-mask::$CONNECTION_STRING"
 
-          # Formato exigido pelo header OTLP da New Relic (RFC-004, secao "Destino OTLP e
-          # autenticacao): "api-key=<license key>", lido pelo OTEL_EXPORTER_OTLP_HEADERS.
+          # Formato exigido pelo header OTLP da New Relic: "api-key=<license key>", lido pelo
+          # OTEL_EXPORTER_OTLP_HEADERS.
           OTLP_HEADERS="api-key=${NEW_RELIC_LICENSE_KEY}"
           echo "::add-mask::$OTLP_HEADERS"
 
-          kubectl create secret generic oficina-secrets \
+          kubectl create secret generic ordens-servico-secrets \
             --namespace oficina-mecanica \
             --from-literal=ConnectionStrings__Default="$CONNECTION_STRING" \
             --from-literal=Jwt__Secret="$JWT_SECRET" \
-            --from-literal=Auth__AdminSenha="$ADMIN_SENHA" \
             --from-literal=OTEL_EXPORTER_OTLP_HEADERS="$OTLP_HEADERS" \
             --dry-run=client -o yaml | kubectl apply -f -
 
-      - name: Aplicar ConfigMap e manifestos da aplicacao
+      - name: Aplicar ConfigMap e manifestos do servico
         run: |
-          kubectl apply -f k8s/base/01-configmap.yaml
-          sed "s|IMAGE_PLACEHOLDER|${{ needs.docker-image.outputs.image }}|" k8s/app/20-api-deployment.yaml | kubectl apply -f -
-          kubectl apply -f k8s/app/21-api-service.yaml
-          kubectl apply -f k8s/app/22-api-hpa.yaml
+          kubectl apply -f k8s/01-configmap.yaml
+          sed "s|IMAGE_PLACEHOLDER|${{ needs.docker-image.outputs.image }}|" k8s/10-deployment.yaml | kubectl apply -f -
+          kubectl apply -f k8s/11-service.yaml
+          kubectl apply -f k8s/12-hpa.yaml
 
       - name: Aguardar rollout
-        run: kubectl rollout status deployment/oficina-api -n oficina-mecanica --timeout=5m
+        run: kubectl rollout status deployment/ordens-servico -n oficina-mecanica --timeout=5m
 
       # Descobre o endpoint pelo NOME da API (nunca hardcoded - muda a cada recriacao) e valida a
-      # cadeia inteira: API Gateway -> VPC Link -> NLB -> NodePort -> pod -> RDS. Com retentativas
-      # porque a NLB leva alguns minutos apos o deploy para marcar o alvo como saudavel.
-      - name: Smoke test (GET /healthz/ready via API Gateway)
+      # cadeia inteira: API Gateway -> VPC Link -> NLB -> NodePort -> pod -> RDS. A rota tecnica
+      # /ordens-servico/{proxy+} reescreve o caminho, entao GET /ordens-servico/healthz/ready chega ao pod como
+      # GET /healthz/ready. Com retentativas porque a NLB leva alguns minutos apos o deploy para
+      # marcar o alvo como saudavel.
+      - name: Smoke test (GET /ordens-servico/healthz/ready via API Gateway)
         run: |
           API_ENDPOINT=$(aws apigatewayv2 get-apis \
-            --query "Items[?Name=='oficina-mecanica-api'].ApiEndpoint | [0]" \
+            --query "Items[?Name=='${{ env.API_GATEWAY_NAME }}'].ApiEndpoint | [0]" \
             --output text)
 
           if [ -z "$API_ENDPOINT" ] || [ "$API_ENDPOINT" == "None" ]; then
-            echo "FALHA: nao foi possivel resolver o endpoint da API 'oficina-mecanica-api'."
+            echo "FALHA: nao foi possivel resolver o endpoint da API '${{ env.API_GATEWAY_NAME }}'."
             exit 1
           fi
 
           echo "Endpoint resolvido: $API_ENDPOINT"
 
           for i in $(seq 1 30); do
-            HTTP_STATUS=$(curl -sS -o /tmp/healthz.json -w "%{http_code}" "$API_ENDPOINT/healthz/ready" || echo "000")
+            HTTP_STATUS=$(curl -sS --max-time 15 -o /tmp/healthz.json -w "%{http_code}" "$API_ENDPOINT/ordens-servico/healthz/ready" || true)
             if [ "$HTTP_STATUS" == "200" ]; then
-              echo "OK: /healthz/ready respondeu 200"
+              echo "OK: /ordens-servico/healthz/ready respondeu 200"
               cat /tmp/healthz.json; echo
               exit 0
             fi
@@ -182,12 +274,12 @@ jobs:
             sleep 10
           done
 
-          echo "FALHA: /healthz/ready nao respondeu 200 a tempo."
+          echo "FALHA: /ordens-servico/healthz/ready nao respondeu 200 a tempo."
           exit 1
 
       # RFC-004, secao 6.1: metricas de CPU/memoria de node e pod nao vem do OTLP da aplicacao -
-      # exigem o Kubernetes integration da New Relic, instalado DEPOIS do deploy e do smoke test da
-      # aplicacao para que uma falha do agente de observabilidade nao bloqueie a subida do sistema
+      # exigem o Kubernetes integration da New Relic, instalado DEPOIS do deploy e do smoke test do
+      # servico para que uma falha do agente de observabilidade nao bloqueie a subida do sistema
       # principal. helm upgrade --install e idempotente (seguro rodar em todo deploy). Values
       # versionados em k8s/observabilidade/newrelic-values.yaml documentam a conta de capacidade e
       # por que cada componente extra do bundle esta desligado.
@@ -200,6 +292,7 @@ jobs:
         env:
           NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
         run: |
+          [ -n "$NEW_RELIC_LICENSE_KEY" ] || { echo "::error::secret NEW_RELIC_LICENSE_KEY ausente"; exit 1; }
           echo "::add-mask::$NEW_RELIC_LICENSE_KEY"
           kubectl create namespace newrelic --dry-run=client -o yaml | kubectl apply -f -
           kubectl create secret generic newrelic-license-key \
@@ -217,6 +310,8 @@ jobs:
             -f k8s/observabilidade/newrelic-values.yaml \
             --wait --timeout 5m
 
+      # Namespace inteiro (nao so este servico): o namespace e compartilhado pelos cinco servicos e
+      # o consumo de nos e pods mostra a folga do cluster com todos eles no ar.
       - name: Estado do cluster (evidencia nos logs)
         if: always()
         run: |
