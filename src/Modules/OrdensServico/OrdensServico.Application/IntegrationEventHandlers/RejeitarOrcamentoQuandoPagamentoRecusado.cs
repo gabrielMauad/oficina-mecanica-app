@@ -4,6 +4,7 @@ using OficinaMecanica.Contracts.IntegrationEvents;
 using OrdensServico.Application.Ordens.Commands.RejeitarOrcamentoPorPagamentoRecusado;
 using OrdensServico.Domain.OrdemServico;
 using SharedKernel.Application;
+using SharedKernel.Application.Metrics;
 using SharedKernel.Domain;
 
 namespace OrdensServico.Application.IntegrationEventHandlers;
@@ -17,13 +18,16 @@ public sealed class RejeitarOrcamentoQuandoPagamentoRecusado
     : IIntegrationEventHandler<PagamentoRecusadoIntegrationEvent>
 {
     private readonly ISender _sender;
+    private readonly IntegracoesMetrics _metrics;
     private readonly ILogger<RejeitarOrcamentoQuandoPagamentoRecusado> _logger;
 
     public RejeitarOrcamentoQuandoPagamentoRecusado(
         ISender sender,
+        IntegracoesMetrics metrics,
         ILogger<RejeitarOrcamentoQuandoPagamentoRecusado> logger)
     {
         _sender = sender;
+        _metrics = metrics;
         _logger = logger;
     }
 
@@ -35,6 +39,7 @@ public sealed class RejeitarOrcamentoQuandoPagamentoRecusado
             cancellationToken);
 
         if (result.IsFailure)
+        {
             _logger.LogError(
                 "Não foi possível rejeitar o orçamento {OrcamentoId} da OS {OrdemServicoId} após o pagamento recusado {PagamentoId} ({Motivo}): {Erro}.",
                 integrationEvent.OrcamentoId,
@@ -42,5 +47,7 @@ public sealed class RejeitarOrcamentoQuandoPagamentoRecusado
                 integrationEvent.PagamentoId,
                 integrationEvent.Motivo,
                 result.Error);
+            _metrics.RegistrarFalha(nameof(PagamentoRecusadoIntegrationEvent), nameof(RejeitarOrcamentoQuandoPagamentoRecusado));
+        }
     }
 }

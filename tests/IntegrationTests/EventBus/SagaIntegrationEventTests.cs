@@ -198,6 +198,86 @@ public class SagaIntegrationEventTests
         Assert.Equal(2, os.RootElement.GetProperty("orcamentos").GetArrayLength());
     }
 
+    /// <summary>
+    /// Novo diagnóstico após a rejeição do primeiro orçamento: gera o segundo orçamento, que o
+    /// handler de <c>OrcamentoGerado</c> deixa Enviado. Devolve o id do novo orçamento.
+    /// </summary>
+    private async Task<Guid> RegistrarNovoDiagnosticoAsync(HttpClient oficina, Cenario cenario)
+    {
+        var diagnostico = await oficina.PatchAsJsonAsync(
+            $"/api/v1/ordens-servico/{cenario.OsId}/registrar-diagnostico", new
+            {
+                DescricaoDiagnostico = "Novo diagnóstico após a rejeição do orçamento.",
+                Servicos = new[] { new { ServicoId = cenario.ServicoId, Quantidade = 1 } },
+                Pecas = new[] { new { PecaInsumoId = cenario.PecaId, Quantidade = 1 } }
+            });
+        Assert.Equal(HttpStatusCode.OK, diagnostico.StatusCode);
+
+        var harness = _factory.CriarHarness();
+        await OficinaMecanicaWebApplicationFactory.AguardarAsync(
+            () => Task.FromResult(harness.Published.Select<OrcamentoGeradoIntegrationEvent>(
+                x => x.Context.Message.OrdemServicoId == cenario.OsId).Count() == 2),
+            $"segundo OrcamentoGerado da OS {cenario.OsId} publicado");
+        var novoOrcamentoId = harness.Published.Select<OrcamentoGeradoIntegrationEvent>(
+            x => x.Context.Message.OrdemServicoId == cenario.OsId).Last().Context.Message.OrcamentoId;
+        Assert.NotEqual(cenario.OrcamentoId, novoOrcamentoId);
+
+        await _factory.AguardarStatusDoOrcamentoAsync(oficina, cenario.OsId, "Enviado", indice: 1);
+        return novoOrcamentoId;
+    }
+
+    [Fact(DisplayName = "Ciclo de compensação: pagamento recusado → novo diagnóstico → aprovação → pagamento aprovado do novo orçamento → EmExecucao")]
+    public async Task CicloDeCompensacao_PagamentoRecusadoEDepoisAprovadoDoNovoOrcamento_ExecutaAOs()
+    {
+        using var oficina = _factory.CreateAuthenticatedClient(await _factory.GetAuthTokenAsync());
+        var cenario = await AbrirOsComOrcamentoEnviadoAsync(oficina, "Ciclo");
+        await AprovarOrcamentoAsync(cenario);
+        var harness = _factory.CriarHarness();
+
+        // Pagamento do orçamento X recusado: X Rejeitado, estorno publicado, OS segue aguardando.
+        await harness.Bus.Publish(new PagamentoRecusadoIntegrationEvent(
+            Guid.NewGuid(), DateTime.UtcNow, Guid.NewGuid(), cenario.OsId, cenario.OrcamentoId, "recusado"));
+        await _factory.AguardarStatusDoOrcamentoAsync(oficina, cenario.OsId, "Rejeitado", indice: 0);
+        Assert.True(await harness.Published.Any<OrcamentoRejeitadoIntegrationEvent>(
+            x => x.Context.Message.OrdemServicoId == cenario.OsId && x.Context.Message.OrcamentoId == cenario.OrcamentoId));
+        Assert.Equal("AguardandoAprovacao", await StatusDaOsAsync(oficina, cenario.OsId));
+
+        // Novo diagnóstico gera o orçamento Y, que o cliente aprova.
+        var orcamentoY = await RegistrarNovoDiagnosticoAsync(oficina, cenario);
+        await AprovarOrcamentoAsync(cenario);
+        await _factory.AguardarStatusDoOrcamentoAsync(oficina, cenario.OsId, "Aprovado", indice: 1);
+        Assert.Equal("AguardandoAprovacao", await StatusDaOsAsync(oficina, cenario.OsId));
+
+        // Pagamento aprovado do orçamento Y: a OS entra em execução.
+        await harness.Bus.Publish(new PagamentoAprovadoIntegrationEvent(
+            Guid.NewGuid(), DateTime.UtcNow, Guid.NewGuid(), cenario.OsId, orcamentoY));
+
+        await _factory.AguardarStatusDaOsAsync(oficina, cenario.OsId, "EmExecucao");
+    }
+
+    [Fact(DisplayName = "PagamentoAprovado de orçamento Rejeitado (com outro Aprovado na OS): a OS continua AguardandoAprovacao")]
+    public async Task PagamentoAprovado_DeOrcamentoRejeitado_NaoExecutaAOs()
+    {
+        using var oficina = _factory.CreateAuthenticatedClient(await _factory.GetAuthTokenAsync());
+        var cenario = await AbrirOsComOrcamentoEnviadoAsync(oficina, "PagOrcRejeitado");
+        await AprovarOrcamentoAsync(cenario);
+        var harness = _factory.CriarHarness();
+        await harness.Bus.Publish(new PagamentoRecusadoIntegrationEvent(
+            Guid.NewGuid(), DateTime.UtcNow, Guid.NewGuid(), cenario.OsId, cenario.OrcamentoId, "recusado"));
+        await _factory.AguardarStatusDoOrcamentoAsync(oficina, cenario.OsId, "Rejeitado", indice: 0);
+        await RegistrarNovoDiagnosticoAsync(oficina, cenario);
+        await AprovarOrcamentoAsync(cenario);
+        await _factory.AguardarStatusDoOrcamentoAsync(oficina, cenario.OsId, "Aprovado", indice: 1);
+
+        // Pagamento aprovado referente ao orçamento X, já Rejeitado.
+        var pagamentoDoOrcamentoRejeitado = new PagamentoAprovadoIntegrationEvent(
+            Guid.NewGuid(), DateTime.UtcNow, Guid.NewGuid(), cenario.OsId, cenario.OrcamentoId);
+        await harness.Bus.Publish(pagamentoDoOrcamentoRejeitado);
+
+        await AguardarConsumoSemErroAsync(harness, pagamentoDoOrcamentoRejeitado);
+        Assert.Equal("AguardandoAprovacao", await StatusDaOsAsync(oficina, cenario.OsId));
+    }
+
     // ── EstoqueBaixaFalhou → Rejeitado sem estorno ──────────────────────────
 
     [Fact(DisplayName = "Consumir EstoqueBaixaFalhou → orçamento Rejeitado e nenhum OrcamentoRejeitado publicado")]

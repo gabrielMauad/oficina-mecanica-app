@@ -4,6 +4,7 @@ using OficinaMecanica.Contracts.IntegrationEvents;
 using OrdensServico.Application.Ordens.Commands.RejeitarOrcamentoPorFalhaDeEstoque;
 using OrdensServico.Domain.OrdemServico;
 using SharedKernel.Application;
+using SharedKernel.Application.Metrics;
 using SharedKernel.Domain;
 
 namespace OrdensServico.Application.IntegrationEventHandlers;
@@ -16,13 +17,16 @@ public sealed class RejeitarOrcamentoQuandoEstoqueBaixaFalhou
     : IIntegrationEventHandler<EstoqueBaixaFalhouIntegrationEvent>
 {
     private readonly ISender _sender;
+    private readonly IntegracoesMetrics _metrics;
     private readonly ILogger<RejeitarOrcamentoQuandoEstoqueBaixaFalhou> _logger;
 
     public RejeitarOrcamentoQuandoEstoqueBaixaFalhou(
         ISender sender,
+        IntegracoesMetrics metrics,
         ILogger<RejeitarOrcamentoQuandoEstoqueBaixaFalhou> logger)
     {
         _sender = sender;
+        _metrics = metrics;
         _logger = logger;
     }
 
@@ -34,11 +38,14 @@ public sealed class RejeitarOrcamentoQuandoEstoqueBaixaFalhou
             cancellationToken);
 
         if (result.IsFailure)
+        {
             _logger.LogError(
                 "Não foi possível rejeitar o orçamento {OrcamentoId} da OS {OrdemServicoId} após a falha na baixa de estoque ({Motivo}): {Erro}.",
                 integrationEvent.OrcamentoId,
                 integrationEvent.OrdemServicoId,
                 integrationEvent.Motivo,
                 result.Error);
+            _metrics.RegistrarFalha(nameof(EstoqueBaixaFalhouIntegrationEvent), nameof(RejeitarOrcamentoQuandoEstoqueBaixaFalhou));
+        }
     }
 }
