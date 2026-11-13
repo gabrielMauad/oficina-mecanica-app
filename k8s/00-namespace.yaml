@@ -1,0 +1,8 @@
+# Namespace compartilhado por todos os servicos da oficina. Identico em todos os repositorios:
+# aplicar e idempotente, entao qualquer pipeline de servico pode (re)aplicar sem conflito.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: oficina-mecanica
+  labels:
+    app.kubernetes.io/part-of: oficina-mecanica

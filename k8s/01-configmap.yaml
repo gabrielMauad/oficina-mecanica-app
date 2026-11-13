@@ -1,28 +1,46 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: oficina-config
+  name: ordens-servico-config
   namespace: oficina-mecanica
   labels:
+    app: ordens-servico
     app.kubernetes.io/part-of: oficina-mecanica
 data:
   # Production, nao Development: o publish do SDK inclui appsettings.Development.json na imagem
   # (nao ha exclusao no .csproj/Dockerfile), mas com ASPNETCORE_ENVIRONMENT=Production o ASP.NET
   # Core so carrega appsettings.json + appsettings.Production.json (inexistente) - o arquivo de
   # Development fica no disco do container sem nunca ser lido. Toda configuracao obrigatoria em
-  # runtime vem deste ConfigMap e do Secret oficina-secrets (criado pela pipeline). Nenhum
+  # runtime vem deste ConfigMap e do Secret ordens-servico-secrets (criado pela pipeline). Nenhum
   # IsDevelopment()/branch de ambiente existe no codigo (Program.cs e Extensions/*), so o rotulo
   # deployment.environment do OpenTelemetry muda.
   ASPNETCORE_ENVIRONMENT: "Production"
   ASPNETCORE_URLS: "http://+:8080"
-  Jwt__Issuer: "oficina-mecanica-app"
+  # Validacao do JWT HS256 (segredo compartilhado entre os servicos; o segredo em si vem do
+  # Secret). Este servico so valida tokens - quem emite o token da oficina e o servico de
+  # autenticacao, e o do cliente, a Lambda.
   Jwt__Audience: "oficina-mecanica-api"
   Jwt__ValidIssuers__0: "oficina-mecanica-app"
   Jwt__ValidIssuers__1: "oficina-mecanica-auth"
-  Auth__AdminEmail: "admin@oficina.com"
   OpenApi__Enabled: "true"
+  # Mensageria (MassTransit sobre SNS/SQS). Na AWS as credenciais vem da cadeia padrao do SDK
+  # (role do no do EKS) e nao ha endpoint customizado: ServiceUrl, AccessKey e SecretKey ficam
+  # vazios - so o ambiente local (LocalStack) os preenche. Topicos, filas e assinaturas sao
+  # criados pelo proprio MassTransit na subida do servico.
+  Mensageria__Transporte: "AmazonSqs"
+  Mensageria__Regiao: "us-east-1"
+  Mensageria__ServiceUrl: ""
+  Mensageria__AccessKey: ""
+  Mensageria__SecretKey: ""
+  # Servicos consultados por HTTP, pelo DNS interno do cluster (Service na porta 80 -> container
+  # 8080). O Authorization da requisicao de entrada e repassado a eles pelo proprio servico.
+  Servicos__Cadastro__BaseUrl: "http://cadastro.oficina-mecanica.svc.cluster.local"
+  Servicos__PecasInsumos__BaseUrl: "http://pecas-insumos.oficina-mecanica.svc.cluster.local"
+  # Nome do servico nos sinais do OpenTelemetry (service.name).
+  OTEL_SERVICE_NAME: "oficina-mecanica-ordens-servico"
   # RFC-004: destino OTLP e o New Relic (data center US), endpoint publico - nao e segredo, so a
-  # license key (OTEL_EXPORTER_OTLP_HEADERS) e, e essa vem do Secret oficina-secrets, nunca daqui.
+  # license key (OTEL_EXPORTER_OTLP_HEADERS) e, e essa vem do Secret ordens-servico-secrets, nunca
+  # daqui.
   # Protocolo http/protobuf na porta 4318, nao gRPC/4317: com o endpoint geral (sem variavel por
   # sinal), o exportador OTLP do .NET (OpenTelemetry.Exporter.OpenTelemetryProtocol 1.18.0) anexa
   # automaticamente /v1/traces, /v1/metrics e /v1/logs por sinal quando o protocolo e

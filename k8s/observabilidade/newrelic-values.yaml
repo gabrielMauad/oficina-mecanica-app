@@ -1,39 +1,42 @@
 # Values do chart nri-bundle (New Relic Kubernetes integration), RFC-004 secao 6.1.
 #
-# Instalado pela pipeline (.github/workflows/ci-cd.yml, job "Deploy no EKS"), ANTES dos
-# manifestos da aplicacao, via:
+# Instalado pela pipeline do servico ordens-servico (.github/workflows/ci-cd.yml, job "Deploy no
+# EKS"), DEPOIS do deploy e do smoke test do servico, via:
 #
 #   helm upgrade --install newrelic-bundle newrelic/nri-bundle \
 #     --version 8.0.24 \
-#     --namespace newrelic --create-namespace \
+#     --namespace newrelic \
 #     -f k8s/observabilidade/newrelic-values.yaml
+#
+# Esta e a unica pipeline que instala o bundle: as metricas de node e pod sao do cluster inteiro,
+# nao de um servico. Os demais servicos nao tocam no namespace newrelic.
 #
 # Versao do chart fixada em 8.0.24 (tag existente em
 # https://github.com/newrelic/helm-charts/tree/nri-bundle-8.0.24 - confirmada em 2026-09-15).
-# Reconferir se houver uma janela de tempo grande ate a execucao.
 #
 # Cobre SO o requisito "CPU e memoria do Kubernetes" (metricas de node/pod). Traces, metricas de
-# negocio e runtime do processo .NET ja saem por OTLP direto da aplicacao (k8s/base/01-configmap.yaml)
-# - nao dependem deste chart.
+# negocio e runtime do processo .NET ja saem por OTLP direto de cada servico (ConfigMap
+# <servico>-config em k8s/) - nao dependem deste chart.
 #
 # License key: NAO fica aqui (nunca em texto plano em values versionado). A pipeline cria o Secret
 # do Kubernetes "newrelic-license-key" no namespace "newrelic" a partir do secret do GitHub
-# NEW_RELIC_LICENSE_KEY (mesmo secret usado em OTEL_EXPORTER_OTLP_HEADERS, k8s/base/01-configmap.yaml
-# e o Secret oficina-secrets), e o chart le esse Secret via global.customSecretName/
+# NEW_RELIC_LICENSE_KEY (mesmo secret usado em OTEL_EXPORTER_OTLP_HEADERS, no Secret
+# ordens-servico-secrets), e o chart le esse Secret via global.customSecretName/
 # customSecretLicenseKey abaixo - nunca via --set global.licenseKey.
 #
-# Conta de capacidade (2 nos t3.small, ~1,4 GiB alocaveis / ~1,93 vCPU alocavel cada - confirmado
-# via `kubectl describe nodes` em 2026-09-15; detalhada no PR desta mudanca):
-#   - kubelet (DaemonSet, 1 pod/no, containers kubelet+agent): requests 150m CPU / 250Mi mem,
-#     limits 300m CPU / 500Mi mem POR NO.
-#   - ksm - coletor do New Relic (Deployment, 1 replica, containers ksm+forwarder): requests
-#     80m CPU / 128Mi mem, limits 150m CPU / 256Mi mem (so em 1 dos 2 nos).
-#   - kube-state-metrics - subchart separado (Deployment, 1 replica): requests 50m CPU / 64Mi mem,
-#     limits 100m CPU / 128Mi mem (so em 1 dos 2 nos).
-# Somando ao que ja roda hoje no cluster (aws-node, kube-proxy, coredns x2, metrics-server x2) e
-# a aplicacao em ate 5 replicas (HPA, 256Mi request/replica), o uso de memoria (requests) fica em
-# ~82-85% da capacidade combinada dos 2 nos - cabe, mas apertado; o limite mais provavel de doer
-# primeiro e o de 11 pods/no (ENI do t3.small), nao memoria. Ver conclusao completa no PR.
+# Conta de capacidade - 3 nos t3.medium (2 vCPU / 4 GiB; desired 3, min 2, max 4 no node group),
+# cinco servicos escalando ate 3 replicas cada. Todos os valores abaixo sao REQUESTS (o que o
+# scheduler soma), derivados dos manifestos e dos defaults dos add-ons do EKS - nao medidos no
+# cluster. Alocavel por no estimado em ~1,93 vCPU (valor confirmado via `kubectl describe nodes`
+# num no de 2 vCPU) e ~3,3 GiB de memoria (4 GiB menos a reserva do kubelet):
+#   - bundle: kubelet (DaemonSet, containers kubelet+agent) 150m / 250Mi POR NO; ksm (coletor,
+#     1 replica) 80m / 128Mi; kube-state-metrics (1 replica) 50m / 64Mi. Com 3 nos: 580m / 942Mi.
+#   - sistema: aws-node, kube-proxy, coredns x2, metrics-server x2: ~775m / ~540Mi no total.
+#   - aplicacao: 5 servicos x 3 replicas x (100m / 256Mi) = 1500m / 3840Mi no pico do HPA.
+#   - total no pico: ~2855m de ~5790m de CPU (~49%) e ~5,2 GiB de ~9,7 GiB de memoria (~54%).
+#   - pods: 15 da aplicacao + 11 de sistema + 4 do bundle = ~30 de 51 (17 pods/no no t3.medium).
+# Com o node group no minimo (2 nos) o pico ainda cabe: ~67% de CPU, ~77% de memoria e 27 pods
+# de 34. Nenhum dos tres recursos e o limite: ha folga para todos os servicos escalarem ao teto.
 
 global:
   cluster: oficina-mecanica
@@ -72,8 +75,8 @@ newrelic-infrastructure:
   # controlPlane.resources fica de fora: controlPlane.enabled=false (control plane gerenciado
   # pela AWS, nao roda scraper nenhum aqui).
   #
-  # kubelet e DaemonSet (1 pod por no) - e o que mais pesa na capacidade dos t3.small (ver conta
-  # de capacidade no PR). ksm e um Deployment (1 replica so), pesa bem menos.
+  # kubelet e DaemonSet (1 pod por no) - e o componente do bundle que mais pesa na capacidade
+  # dos nos (ver conta de capacidade no topo). ksm e um Deployment (1 replica so), pesa bem menos.
   ksm:
     enabled: true
     ksm:
@@ -124,7 +127,7 @@ kube-state-metrics:
       memory: 128Mi
 
 # --- Tudo abaixo e explicitamente desligado: nao e requisito desta tarefa e cada um custa pods/
-# recursos que os nos t3.small nao tem sobra para gastar (ver conta de capacidade no PR) ---
+# recursos que o cluster nao precisa gastar (ver conta de capacidade no topo) ---
 
 # Logs ja saem por OTLP direto da aplicacao (Tarefa 3) - o forwarder de log do cluster seria
 # redundante (e so cobriria stdout, que a aplicacao ja envia por um caminho melhor, com contexto
@@ -156,7 +159,7 @@ pixie-chart:
   enabled: false
 
 # Metrics adapter para HPA custom/external metrics via New Relic - o HPA deste projeto usa metrica
-# nativa de CPU (metrics-server, k8s/app/22-api-hpa.yaml), nao precisa de metrica externa.
+# nativa de CPU (metrics-server, k8s/12-hpa.yaml), nao precisa de metrica externa.
 newrelic-k8s-metrics-adapter:
   enabled: false
 

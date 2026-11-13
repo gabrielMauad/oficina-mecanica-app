@@ -4,7 +4,18 @@ on:
   pull_request:
     branches: [ main ]
 
+# O CI so le o codigo: nenhum passo escreve no repositorio nem no PR.
+permissions:
+  contents: read
+
+env:
+  SOLUTION: OficinaMecanica.slnx
+
 jobs:
+  # Mesmos passos do job build-test do ci-cd.yml (build, testes com cobertura e SonarCloud), para
+  # que o PR seja validado do mesmo jeito que o codigo que chega na main. O nome do job
+  # ("Build & Test") e o que a protecao da branch main referencia - nao renomear. Ainda nao ha
+  # quality gate bloqueante: o resultado e publicado no SonarCloud sem falhar a pipeline.
   build-and-test:
     name: Build & Test
     runs-on: ubuntu-latest
@@ -12,17 +23,72 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Historico completo: o SonarCloud usa o blame do git para atribuir codigo novo/antigo.
+          fetch-depth: 0
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
 
+      # A analise do SonarCloud e opcional. Sem o secret SONAR_TOKEN e as variables
+      # SONAR_PROJECT_KEY e SONAR_ORGANIZATION, restore, build, testes e cobertura rodam normalmente
+      # e apenas a analise e ignorada (todos os passos do Sonar abaixo dependem de
+      # steps.sonar.outputs.enabled). O token so e entregue a este passo e aos passos do Sonar, via
+      # env - nunca ao restante do job. Em PRs vindos de fork o secret nao e exposto, entao a
+      # analise tambem e ignorada la.
+      - name: Detectar configuracao do SonarCloud
+        id: sonar
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
+          SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
+        run: |
+          if [ -n "$SONAR_TOKEN" ] && [ -n "$SONAR_PROJECT_KEY" ] && [ -n "$SONAR_ORGANIZATION" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::SonarCloud nao configurado (secret SONAR_TOKEN e/ou variables SONAR_PROJECT_KEY/SONAR_ORGANIZATION ausentes): analise ignorada; build, testes e cobertura seguem normalmente."
+          fi
+
+      - name: Setup Java 17
+        if: steps.sonar.outputs.enabled == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Instalar dotnet-sonarscanner
+        if: steps.sonar.outputs.enabled == 'true'
+        run: dotnet tool install --global dotnet-sonarscanner --version 12.1.0
+
       - name: Restore dependencies
-        run: dotnet restore OficinaMecanica.slnx
+        run: dotnet restore "${{ env.SOLUTION }}"
+
+      - name: SonarCloud - begin
+        if: steps.sonar.outputs.enabled == 'true'
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          dotnet sonarscanner begin \
+            /k:"${{ vars.SONAR_PROJECT_KEY }}" \
+            /o:"${{ vars.SONAR_ORGANIZATION }}" \
+            /d:sonar.token="$SONAR_TOKEN" \
+            /d:sonar.host.url="https://sonarcloud.io" \
+            /d:sonar.cs.opencover.reportsPaths="**/coverage.opencover.xml" \
+            /d:sonar.coverage.exclusions="**/Migrations/**,**/Program.cs"
 
       - name: Build
-        run: dotnet build OficinaMecanica.slnx --no-restore --configuration Release
+        run: dotnet build "${{ env.SOLUTION }}" --no-restore --configuration Release
 
-      - name: Test
-        run: dotnet test OficinaMecanica.slnx --no-build --configuration Release --verbosity normal
+      - name: Test (com cobertura)
+        run: |
+          dotnet test "${{ env.SOLUTION }}" --no-build --configuration Release --verbosity normal \
+            --collect "XPlat Code Coverage;Format=opencover"
+
+      - name: SonarCloud - end
+        if: steps.sonar.outputs.enabled == 'true'
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
