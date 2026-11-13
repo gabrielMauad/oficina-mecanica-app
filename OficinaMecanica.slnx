@@ -21,6 +21,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/IntegrationTests/IntegrationTests.csproj" />
+    <Project Path="tests/OrdensServico.Bdd/OrdensServico.Bdd.csproj" />
   </Folder>
   <Folder Name="/tests/SharedKernel/">
     <Project Path="tests/SharedKernel/SharedKernel.Application.Tests/SharedKernel.Application.Tests.csproj" />
