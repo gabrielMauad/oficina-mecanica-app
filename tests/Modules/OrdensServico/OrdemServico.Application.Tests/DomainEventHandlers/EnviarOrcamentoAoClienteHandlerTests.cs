@@ -4,12 +4,15 @@ using OrdensServico.Application.Gateways;
 using OrdensServico.Application.Gateways.Dtos;
 using OrdensServico.Domain.OrdemServico;
 using OrdensServico.Domain.OrdemServico.Events;
+using Microsoft.Extensions.Diagnostics.Metrics.Testing;
 using SharedKernel.Application;
+using SharedKernel.Application.Metrics;
 
 namespace OrdensServico.Application.Tests.DomainEventHandlers;
 
-public class EnviarOrcamentoAoClienteHandlerTests
+public class EnviarOrcamentoAoClienteHandlerTests : IDisposable
 {
+    private readonly IntegracoesMetrics _metrics = new();
     private readonly Mock<IOrdemServicoGateway> _repoMock = new();
     private readonly Mock<IUnitOfWork> _uowMock = new();
     private readonly Mock<INotificacaoClienteGateway> _notificacaoMock = new();
@@ -34,8 +37,11 @@ public class EnviarOrcamentoAoClienteHandlerTests
             _veiculoMock.Object,
             _servicoMock.Object,
             _pecaInfoMock.Object,
+            _metrics,
             NullLogger<EnviarOrcamentoAoCliente>.Instance);
     }
+
+    public void Dispose() => _metrics.Dispose();
 
     private static OrdensServico.Domain.OrdemServico.OrdemServico CriarOsEmDiagnosticoComOrcamento()
     {
@@ -102,6 +108,82 @@ public class EnviarOrcamentoAoClienteHandlerTests
             It.IsAny<IReadOnlyList<Application.Gateways.Dtos.PecaEmailItem>>(),
             It.IsAny<decimal>(), It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    [Fact(DisplayName = "Falha ao consultar o Cadastro: não propaga, registra a métrica e o orçamento já foi salvo")]
+    public async Task Handle_CadastroLancaExcecao_NaoPropagaERegistraMetrica()
+    {
+        var os = CriarOsEmDiagnosticoComOrcamento();
+        var notification = CriarNotificacao(os);
+
+        _repoMock.Setup(x => x.ObterPorId(notification.OrdemServicoId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(os);
+        _clienteMock.Setup(x => x.ObterInfo(ClienteId, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("Cadastro fora do ar"));
+        using var falhas = new MetricCollector<long>(_metrics.Meter, IntegracoesMetrics.FalhasInstrumentName);
+
+        await _handler.Handle(notification, CancellationToken.None);
+
+        _uowMock.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal(StatusOrdemServico.AguardandoAprovacao, os.Status);
+        var medicao = Assert.Single(falhas.GetMeasurementSnapshot());
+        Assert.Equal(1, medicao.Value);
+        Assert.Equal(nameof(OrcamentoGerado), medicao.Tags["evento"]);
+        Assert.Equal(nameof(EnviarOrcamentoAoCliente), medicao.Tags["handler"]);
+        _notificacaoMock.Verify(x => x.NotificarOrcamentoPronto(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<IReadOnlyList<Application.Gateways.Dtos.ServicoEmailItem>>(),
+            It.IsAny<IReadOnlyList<Application.Gateways.Dtos.PecaEmailItem>>(),
+            It.IsAny<decimal>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact(DisplayName = "Falha ao enviar o e-mail: não propaga e registra a métrica")]
+    public async Task Handle_EnvioDoEmailLancaExcecao_NaoPropagaERegistraMetrica()
+    {
+        var os = CriarOsEmDiagnosticoComOrcamento();
+        var notification = CriarNotificacao(os);
+
+        _repoMock.Setup(x => x.ObterPorId(notification.OrdemServicoId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(os);
+        _clienteMock.Setup(x => x.ObterInfo(ClienteId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ClienteInfo("João Silva", "joao@email.com"));
+        _veiculoMock.Setup(x => x.ObterPlaca(VeiculoId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync("ABC1D23");
+        _servicoMock.Setup(x => x.ObterNome(ServicoId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync("Troca de óleo");
+        _pecaInfoMock.Setup(x => x.Obter(PecaId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PecaInsumoInfo("Filtro", "un"));
+        _notificacaoMock.Setup(x => x.NotificarOrcamentoPronto(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<IReadOnlyList<Application.Gateways.Dtos.ServicoEmailItem>>(),
+                It.IsAny<IReadOnlyList<Application.Gateways.Dtos.PecaEmailItem>>(),
+                It.IsAny<decimal>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("SMTP indisponível"));
+        using var falhas = new MetricCollector<long>(_metrics.Meter, IntegracoesMetrics.FalhasInstrumentName);
+
+        await _handler.Handle(notification, CancellationToken.None);
+
+        Assert.Single(falhas.GetMeasurementSnapshot());
+    }
+
+    [Fact(DisplayName = "Cancelamento da requisição durante o e-mail: a exceção é propagada")]
+    public async Task Handle_RequisicaoCancelada_PropagaAExcecao()
+    {
+        var os = CriarOsEmDiagnosticoComOrcamento();
+        var notification = CriarNotificacao(os);
+        using var cts = new CancellationTokenSource();
+
+        _repoMock.Setup(x => x.ObterPorId(notification.OrdemServicoId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(os);
+        _clienteMock.Setup(x => x.ObterInfo(ClienteId, It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                cts.Cancel();
+                throw new OperationCanceledException(cts.Token);
+            });
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => _handler.Handle(notification, cts.Token));
     }
 
     [Fact(DisplayName = "Cliente ou placa nulos: salva mas não notifica")]

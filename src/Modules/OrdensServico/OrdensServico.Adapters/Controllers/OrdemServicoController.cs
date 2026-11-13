@@ -5,7 +5,6 @@ using OrdensServico.Adapters.Presenters;
 using OrdensServico.Application.Ordens.Commands.AbrirOrdemServicoCompleta;
 using OrdensServico.Application.Ordens.Commands.AprovarOrcamento;
 using OrdensServico.Application.Ordens.Commands.ConcluirOrdemServico;
-using OrdensServico.Application.Ordens.Commands.ExecutarOrdemServico;
 using OrdensServico.Application.Ordens.Commands.FinalizarOrdemServico;
 using OrdensServico.Application.Ordens.Commands.GerarOrdemServico;
 using OrdensServico.Application.Ordens.Commands.IniciarDiagnostico;
@@ -65,13 +64,6 @@ public sealed class OrdemServicoController
     public async Task<Result<OrdemServicoViewModel>> RejeitarOrcamento(Guid id, Guid? solicitanteClienteId = null)
     {
         var result = await _sender.Send(new RejeitarOrcamentoCommand(id, solicitanteClienteId));
-        if (result.IsFailure) return result.Error;
-        return OrdemServicoPresenter.Present(result.Value);
-    }
-
-    public async Task<Result<OrdemServicoViewModel>> Executar(Guid id)
-    {
-        var result = await _sender.Send(new ExecutarOrdemServicoCommand(id));
         if (result.IsFailure) return result.Error;
         return OrdemServicoPresenter.Present(result.Value);
     }

@@ -5,6 +5,7 @@ using OrdensServico.Application.Gateways.Dtos;
 using OrdensServico.Domain.OrdemServico;
 using OrdensServico.Domain.OrdemServico.Events;
 using SharedKernel.Application;
+using SharedKernel.Application.Metrics;
 using SharedKernel.Domain;
 
 namespace OrdensServico.Application.DomainEventHandlers;
@@ -18,6 +19,7 @@ public sealed class EnviarOrcamentoAoCliente : INotificationHandler<OrcamentoGer
     private readonly IVeiculoGateway _veiculoGateway;
     private readonly IServicoGateway _servicoGateway;
     private readonly IPecaInsumoInfoGateway _pecaInsumoInfoGateway;
+    private readonly IntegracoesMetrics _metrics;
     private readonly ILogger<EnviarOrcamentoAoCliente> _logger;
 
     public EnviarOrcamentoAoCliente(
@@ -28,6 +30,7 @@ public sealed class EnviarOrcamentoAoCliente : INotificationHandler<OrcamentoGer
         IVeiculoGateway veiculoGateway,
         IServicoGateway servicoGateway,
         IPecaInsumoInfoGateway pecaInsumoInfoGateway,
+        IntegracoesMetrics metrics,
         ILogger<EnviarOrcamentoAoCliente> logger)
     {
         _ordemServicoGateway = ordemServicoGateway;
@@ -37,6 +40,7 @@ public sealed class EnviarOrcamentoAoCliente : INotificationHandler<OrcamentoGer
         _veiculoGateway = veiculoGateway;
         _servicoGateway = servicoGateway;
         _pecaInsumoInfoGateway = pecaInsumoInfoGateway;
+        _metrics = metrics;
         _logger = logger;
     }
 
@@ -64,6 +68,25 @@ public sealed class EnviarOrcamentoAoCliente : INotificationHandler<OrcamentoGer
         await _ordemServicoGateway.Atualizar(ordemServico, ct);
         await _unitOfWork.SaveChangesAsync(ct);
 
+        // O e-mail é um efeito secundário: uma falha ao montá-lo ou enviá-lo (ex.: Cadastro fora do ar)
+        // não pode impedir os demais handlers do OrcamentoGerado (publicação do evento que dispara a
+        // baixa de estoque) nem mudar a resposta da requisição.
+        try
+        {
+            await NotificarCliente(ordemServico, notification, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _metrics.RegistrarFalha(nameof(OrcamentoGerado), nameof(EnviarOrcamentoAoCliente));
+            _logger.LogError(
+                ex,
+                "Falha ao enviar o orçamento por e-mail ao cliente da OS {OrdemServicoId}; o fluxo segue sem o e-mail.",
+                notification.OrdemServicoId);
+        }
+    }
+
+    private async Task NotificarCliente(OrdemServico ordemServico, OrcamentoGerado notification, CancellationToken ct)
+    {
         ClienteInfo? cliente = await _clienteGateway.ObterInfo(ordemServico.ClienteId, ct);
         string? placa = await _veiculoGateway.ObterPlaca(ordemServico.VeiculoId, ct);
 

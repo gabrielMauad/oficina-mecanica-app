@@ -7,10 +7,12 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http;
 using Microsoft.IdentityModel.Tokens;
+using OficinaMecanica.Contracts.IntegrationEvents;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net.Http.Headers;
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json;
 using Testcontainers.PostgreSql;
 
 namespace IntegrationTests.Infrastructure;
@@ -77,6 +79,68 @@ public sealed class OficinaMecanicaWebApplicationFactory
     /// Harness do MassTransit do host de teste: permite verificar os eventos de integração publicados.
     /// </summary>
     public ITestHarness CriarHarness() => Services.GetRequiredService<ITestHarness>();
+
+    /// <summary>
+    /// Aguarda (até o limite) que a condição fique verdadeira. Os consumers da Saga rodam de forma
+    /// assíncrona no barramento em memória, então o efeito no banco aparece depois da publicação.
+    /// </summary>
+    public static async Task AguardarAsync(Func<Task<bool>> condicao, string descricao, int timeoutSegundos = 15)
+    {
+        var limite = DateTime.UtcNow.AddSeconds(timeoutSegundos);
+        while (DateTime.UtcNow < limite)
+        {
+            if (await condicao()) return;
+            await Task.Delay(100);
+        }
+
+        throw new TimeoutException($"Condição não atendida no prazo: {descricao}.");
+    }
+
+    /// <summary>Lê o JSON de uma OS (GET /api/v1/ordens-servico/{id}) como documento.</summary>
+    public static async Task<JsonDocument> ObterOsJsonAsync(HttpClient client, Guid osId)
+    {
+        var response = await client.GetAsync($"/api/v1/ordens-servico/{osId}");
+        response.EnsureSuccessStatusCode();
+        return await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+    }
+
+    /// <summary>Aguarda a OS chegar ao status informado (ex.: "EmExecucao").</summary>
+    public Task AguardarStatusDaOsAsync(HttpClient client, Guid osId, string statusEsperado) =>
+        AguardarAsync(async () =>
+        {
+            using var os = await ObterOsJsonAsync(client, osId);
+            return os.RootElement.GetProperty("status").GetString() == statusEsperado;
+        }, $"OS {osId} no status {statusEsperado}");
+
+    /// <summary>Aguarda o orçamento (por posição) da OS chegar ao status informado.</summary>
+    public Task AguardarStatusDoOrcamentoAsync(HttpClient client, Guid osId, string statusEsperado, int indice = 0) =>
+        AguardarAsync(async () =>
+        {
+            using var os = await ObterOsJsonAsync(client, osId);
+            return os.RootElement.GetProperty("orcamentos")[indice].GetProperty("status").GetString() == statusEsperado;
+        }, $"orçamento {indice} da OS {osId} no status {statusEsperado}");
+
+    /// <summary>Id do orçamento publicado em <c>OrcamentoGerado</c> para a OS (o último, se houver mais de um).</summary>
+    public async Task<Guid> ObterOrcamentoIdPublicadoAsync(Guid osId)
+    {
+        var harness = CriarHarness();
+        Assert.True(await harness.Published.Any<OrcamentoGeradoIntegrationEvent>(
+            x => x.Context.Message.OrdemServicoId == osId));
+        return harness.Published.Select<OrcamentoGeradoIntegrationEvent>(
+            x => x.Context.Message.OrdemServicoId == osId).Last().Context.Message.OrcamentoId;
+    }
+
+    /// <summary>
+    /// Faz o papel do serviço Pagamento: publica <c>PagamentoAprovado</c> para o orçamento da OS e
+    /// aguarda a OS entrar em execução. É a única forma de a OS sair de Aguardando Aprovação.
+    /// </summary>
+    public async Task AprovarPagamentoEAguardarExecucaoAsync(HttpClient client, Guid osId)
+    {
+        var orcamentoId = await ObterOrcamentoIdPublicadoAsync(osId);
+        await CriarHarness().Bus.Publish(new PagamentoAprovadoIntegrationEvent(
+            Guid.NewGuid(), DateTime.UtcNow, Guid.NewGuid(), osId, orcamentoId));
+        await AguardarStatusDaOsAsync(client, osId, "EmExecucao");
+    }
 
     /// <summary>
     /// Cria um HttpClient com Authorization: Bearer {token} pré-configurado.
