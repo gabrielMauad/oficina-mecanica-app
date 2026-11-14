@@ -23,10 +23,10 @@ public sealed class ValidationBehavior<TRequest, TResponse>
         if (!_validators.Any())
             return await next(cancellationToken);
 
-        var context = new ValidationContext<TRequest>(request);
-
+        // Um contexto por validator: o ValidationResult referencia a lista de falhas do contexto, entao
+        // compartilhar o mesmo contexto entre validators repetiria as mensagens ja acumuladas.
         var failures = _validators
-            .Select(v => v.Validate(context))
+            .Select(v => v.Validate(new ValidationContext<TRequest>(request)))
             .SelectMany(r => r.Errors)
             .Where(f => f is not null)
             .ToList();
