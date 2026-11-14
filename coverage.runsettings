@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Configuracao do coverlet (XPlat Code Coverage) usada localmente e no CI:
+    dotnet test, com os parametros: settings coverage.runsettings e collect "XPlat Code Coverage"
+
+  A cobertura e medida em linhas, sobre todas as assemblies de src/. Somente tres tipos de arquivo
+  ficam de fora do calculo, e a mesma lista vale para o SonarCloud (sonar.coverage.exclusions nos
+  workflows), para que os dois numeros coincidam:
+    - **/Migrations/**      migrations do EF Core: codigo gerado pela ferramenta de migracoes.
+    - **/Program.cs         composicao do host (apenas encadeia as extensoes de configuracao).
+    - **/*.generated.cs     codigo gerado por source generators (ex.: suporte a OpenAPI).
+  Nenhuma classe de producao e marcada com [ExcludeFromCodeCoverage].
+-->
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat Code Coverage">
+        <Configuration>
+          <Format>opencover</Format>
+          <ExcludeByFile>**/Migrations/**,**/Program.cs,**/*.generated.cs</ExcludeByFile>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>
