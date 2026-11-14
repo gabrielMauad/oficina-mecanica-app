@@ -607,8 +607,7 @@ reportgenerator -reports:"coverage-results/**/coverage.opencover.xml" -targetdir
 
 **SonarCloud:** o CI já executa a análise (passos `sonarscanner begin/end` com os resultados de
 cobertura), condicionada ao secret `SONAR_TOKEN` e às variables `SONAR_PROJECT_KEY` /
-`SONAR_ORGANIZATION` do repositório. <!-- sonarcloud-link --> O link público do projeto no
-SonarCloud será adicionado aqui quando a conta estiver configurada.
+`SONAR_ORGANIZATION` do repositório. O projeto está publicado no [SonarCloud](https://sonarcloud.io/project/overview?id=gabrielMauad_oficina-mecanica-app).
 
 ## APIs — documentação e coleções
 
