@@ -1,208 +1,705 @@
-# Sistema de Oficina Mecânica
-
-> **Fase 4:** este repositório passou a ser o serviço **OrdensServico** da arquitetura de microsserviços.
-> Cadastro, PecasInsumos, Autenticação e Pagamento estão em repositórios próprios; a documentação
-> completa desta fase será publicada separadamente. O texto abaixo descreve as fases anteriores.
+# Sistema de Oficina Mecânica — Microsserviços (Fase 4)
 
 Back-end de um sistema integrado de atendimento e execução de serviços para oficina mecânica,
 desenvolvido como **Tech Challenge da pós-graduação em Arquitetura de Software (FIAP/SOAT)**.
 
-- **Fase 1** — back-end monolítico com DDD, APIs REST, autenticação JWT e testes.
-- **Fase 2** — **evolução da aplicação** (refatoração para **Clean Code + Clean Architecture** e
-  novas APIs de Ordem de Serviço) **e infraestrutura** (Docker, **Kubernetes**, **Terraform**,
-  **CI/CD** e escalabilidade automática com HPA).
+Na **Fase 4** o monólito modular das fases anteriores foi dividido em **cinco microsserviços**,
+cada um em repositório, banco, imagem e pipeline próprios, ligados por **mensageria assíncrona** e por
+uma **Saga coreografada** com compensação. **Este repositório (`oficina-mecanica-app`) é o serviço
+OrdensServico** — o antigo monólito, que manteve o nome — **e também o ponto de entrada da
+documentação geral do sistema distribuído**: o diagrama geral, a justificativa da divisão, a Saga e
+os links para os demais repositórios estão aqui.
 
-> 📚 **Toda a documentação detalhada está em [`docs/`](docs/README.md)** — este README concentra
-> o contexto e os links. Comece por [`docs/README.md`](docs/README.md) para navegar.
+> 📚 A documentação detalhada está em [`docs/`](docs/README.md). Este README concentra o contexto
+> geral e a documentação do serviço OrdensServico; cada outro serviço tem o próprio README.
 
 ---
 
 ## Índice
 
-- [Sobre o Projeto](#sobre-o-projeto)
-- [Arquitetura e Desenhos da Solução](#arquitetura-e-desenhos-da-solução)
-- [Execução Local (Docker Compose)](#execução-local-docker-compose)
-- [Deploy na Nuvem (AWS)](#deploy-na-nuvem-aws)
+**Sistema distribuído**
+- [Arquitetura geral](#arquitetura-geral)
+- [Os serviços e a justificativa da divisão](#os-serviços-e-a-justificativa-da-divisão)
+- [Saga coreografada](#saga-coreografada)
+- [Tecnologias e por que foram escolhidas](#tecnologias-e-por-que-foram-escolhidas)
+- [Mock do Mercado Pago](#mock-do-mercado-pago)
+- [Repositórios do projeto](#repositórios-do-projeto)
+
+**Serviço OrdensServico (este repositório)**
+- [Propósito e responsabilidade](#propósito-e-responsabilidade)
+- [Arquitetura do serviço](#arquitetura-do-serviço)
+- [API, papéis e eventos](#api-papéis-e-eventos)
+- [Configuração](#configuração)
+- [Execução local](#execução-local)
+- [Testes, BDD e cobertura](#testes-bdd-e-cobertura)
+- [APIs — documentação e coleções](#apis--documentação-e-coleções)
+- [Autenticação e autorização](#autenticação-e-autorização)
+- [Observabilidade](#observabilidade-opentelemetry--new-relic)
 - [CI/CD](#cicd)
-- [Autenticação](#autenticação)
-- [Observabilidade (OpenTelemetry + New Relic)](#observabilidade-opentelemetry--new-relic)
-- [APIs — Documentação e Collection](#apis--documentação-e-collection)
-- [Testes](#testes)
-- [Vídeo Demonstrativo](#vídeo-demonstrativo)
-- [Documentação Completa](#documentação-completa)
+- [Deploy na nuvem e a limitação da AWS Academy](#deploy-na-nuvem-e-a-limitação-da-aws-academy)
+- [Vídeo demonstrativo](#vídeo-demonstrativo)
+
+**Histórico**
+- [Fases 1 a 3](#fases-1-a-3-resumo)
+- [Documentação completa](#documentação-completa)
 
 ---
 
-## Sobre o Projeto
+# Sistema distribuído
 
-### O Desafio
+## Arquitetura geral
 
-Construir um back-end de gestão de oficina com **DDD aplicado**, **APIs RESTful documentadas**,
-**autenticação JWT**, validação de CPF/CNPJ e placa, **cobertura de testes ≥ 80%** nos domínios
-críticos e orquestração via Docker (Fase 1) — e, na Fase 2, provisionar e implantar toda a
-solução em **Kubernetes com IaC e CI/CD**.
+```mermaid
+flowchart TB
+    atendente["Atendente / Mecânico<br/>token papel Oficina"]
+    cliente["Cliente<br/>token papel Cliente"]
 
-### Objetivos da Fase 2
+    subgraph aws["AWS Academy Learner Lab — us-east-1"]
+        direction TB
+        gw["API Gateway (HTTP API)<br/>oficina-mecanica-api<br/>roteamento por prefixo de caminho"]
+        lambda["AWS Lambda — autenticação por CPF<br/>POST /auth/cpf"]
+        nlb["NLB interna<br/>um listener TCP por serviço (30080–30084)"]
 
-A Fase 2 evolui a Fase 1 em **dois pilares** — qualidade/organização do código **e**
-infraestrutura escalável e automatizada.
+        subgraph eks["Amazon EKS — namespace oficina-mecanica"]
+            direction LR
+            os["ordens-servico"]
+            auth["autenticacao"]
+            cad["cadastro"]
+            pec["pecas-insumos"]
+            pag["pagamento<br/>(inclui o mock do Mercado Pago)"]
+        end
 
-**Pilar 1 — Evolução da aplicação**
+        subgraph bancos["Um banco por serviço"]
+            direction LR
+            rdsOs[("RDS PostgreSQL<br/>ordens-servico")]
+            rdsCad[("RDS PostgreSQL<br/>cadastro")]
+            rdsPec[("RDS PostgreSQL<br/>pecas-insumos")]
+            dyn[("DynamoDB<br/>pagamentos")]
+        end
 
-| Objetivo | Entregue |
-|---|---|
-| **Clean Code + Clean Architecture** | Refatoração da Fase 1: separação de camadas e dependências com artefatos nomeados (Controller CA, Gateway, Presenter, Use Cases). Planos em [`docs/planos/refatoracao-clean-architecture/`](docs/planos/refatoracao-clean-architecture/) |
-| **Novas/alteradas APIs de OS** | Abertura completa da OS (cliente, veículo, serviços e peças de uma vez), consulta de status, aprovação/recusa de orçamento, **listagem ordenada por status** com **exclusão lógica** de OS finalizadas/entregues, e notificação de status |
-| **Testes automatizados** | Unitários (xUnit) + integração (Testcontainers) cobrindo os fluxos críticos, cobertura ≥ 80% nos domínios |
+        broker{{"SNS + SQS<br/>MassTransit"}}
+    end
 
-**Pilar 2 — Infraestrutura e automação**
+    nr["New Relic<br/>traces, métricas, logs, dashboards e alertas"]
 
-| Objetivo | Entregue |
-|---|---|
-| **Conteinerização** | `Dockerfile` multi-stage + `docker-compose` para dev local |
-| **Orquestração** em Kubernetes | Deployments, Services, ConfigMap, Secret e **HPA** em [`k8s/`](k8s/) |
-| **Escalabilidade automática** | HorizontalPodAutoscaler por CPU (min 1 / max 5) |
-| **Infraestrutura como Código** | Terraform em três repositórios dedicados — cluster/rede/ECR ([`oficina-mecanica-infra-k8s`](https://github.com/gabrielMauad/oficina-mecanica-infra-k8s)), banco ([`oficina-mecanica-infra-db`](https://github.com/gabrielMauad/oficina-mecanica-infra-db)) e a Function ([`oficina-mecanica-lambda-auth`](https://github.com/gabrielMauad/oficina-mecanica-lambda-auth)) |
-| **CI/CD** | Pipeline GitHub Actions: build → teste → imagem (ECR) → deploy no EKS → smoke test |
+    atendente -->|HTTPS| gw
+    cliente -->|HTTPS| gw
+    gw -->|"POST /auth/cpf"| lambda
+    gw -->|"rotas de negócio, via VPC Link"| nlb
+    nlb --> os & auth & cad & pec & pag
+    lambda -->|"GET /clientes/documento/{cpf}<br/>JWT de serviço"| nlb
 
-> Detalhes das decisões de Clean Architecture em
-> [`docs/arquitetura/clean-architecture.md`](docs/arquitetura/clean-architecture.md) e das mudanças
-> funcionais da OS em [`docs/arquitetura/decisoes.md`](docs/arquitetura/decisoes.md).
+    os -->|"HTTP: cliente, veículo, serviço"| cad
+    os -->|"HTTP: peça e disponibilidade"| pec
 
-### Objetivos Adicionais (estudo de arquitetura)
+    os --- rdsOs
+    cad --- rdsCad
+    pec --- rdsPec
+    pag --- dyn
 
-Além do MVP exigido, o projeto incorpora deliberadamente práticas avançadas:
+    os <-.->|eventos| broker
+    pec <-.->|eventos| broker
+    pag <-.->|eventos| broker
 
-- **Modular Monolith** com fronteiras de Bounded Context físicas (assembly por camada por
-  módulo), preparando a extração futura para microsserviços com mínimo retrabalho.
-- **DDD real**: domain events existem apenas quando há consumidor concreto.
-- **CQRS com MediatR v12**: vertical slices, pipeline behaviors (validação, logging, transação).
-- **Integration Events in-process**: bus desacoplado (`IIntegrationEventBus`) substituível por
-  RabbitMQ/Kafka sem alterar Application ou Domain.
-- **Anti-Corruption Layer (ACL)** para comunicação síncrona entre módulos via ports e adapters.
-
----
-
-## Arquitetura e Desenhos da Solução
-
-Os três desenhos exigidos na Fase 2 estão em [`docs/arquitetura/diagramas/`](docs/arquitetura/diagramas/)
-(Mermaid — renderizam direto no GitHub):
-
-| Desenho | Arquivo |
-|---|---|
-| 🧩 **Componentes da aplicação** (C4 níveis 1–3) | [`diagramas/componentes.md`](docs/arquitetura/diagramas/componentes.md) |
-| 🏗️ **Infraestrutura provisionada** (EKS, RDS, API Gateway, HPA) | [`diagramas/infraestrutura.md`](docs/arquitetura/diagramas/infraestrutura.md) |
-| 🚀 **Fluxo de deploy** (CI/CD) | [`diagramas/fluxo-deploy.md`](docs/arquitetura/diagramas/fluxo-deploy.md) |
-
-### Modular Monolith + Clean Architecture
-
-O projeto é aderente à **Clean Architecture** (os quatro anéis são projetos físicos distintos e
-a Regra de Dependência é forçada em compile-time) e organizado como **Modular Monolith**: cada
-Bounded Context tem 5 projetos próprios, com a fronteira enforçada por referências de projeto.
-Para extrair um microsserviço, basta mover os projetos do módulo, trocar adapters por HTTP
-clients e o bus in-process por mensageria — nada no Domain ou Application muda.
-
-### Bounded Contexts
-
-| Módulo | Responsabilidade |
-|---|---|
-| **Autenticacao** | Login e emissão de JWT |
-| **Cadastro** | Cliente, Veículo, Serviço (catálogo) |
-| **PecasInsumos** | Estoque de peças, disponibilidade, entradas e saídas |
-| **OrdemServico** | Ciclo de vida completo da OS e orçamento |
-
-### Banco de Dados
-
-**PostgreSQL 16**, banco único (`oficina_mecanica`), **1 schema por módulo** (`cadastro`,
-`pecas_insumos`, `ordem_servico`), **sem FK cross-schema** — o isolamento simula microsserviços.
-
-> 📖 Aprofundamento: [`estrutura-do-projeto.md`](docs/arquitetura/estrutura-do-projeto.md) ·
-> [`clean-architecture.md`](docs/arquitetura/clean-architecture.md) ·
-> [`decisoes.md`](docs/arquitetura/decisoes.md) ·
-> [`database-schema.md`](docs/arquitetura/database-schema.md) ·
-> [`event-storming.md`](docs/arquitetura/event-storming.md).
-
----
-
-## Execução Local (Docker Compose)
-
-Forma mais rápida de subir tudo para desenvolvimento e testes manuais.
-
-**Pré-requisitos:** Docker + Docker Compose v2.x. (.NET SDK 10.0 apenas para rodar testes fora do
-container.)
-
-```bash
-git clone https://github.com/gabrielMauad/oficina-mecanica-app.git
-cd oficina-mecanica-app
-
-docker compose up --build
+    eks -.->|"OTLP (OpenTelemetry)"| nr
 ```
 
-Sobe três serviços:
-- **`postgres`** — PostgreSQL 16, banco `oficina_mecanica`, porta `5432`
-- **`api`** — aplicação .NET 10, porta `8080`
-- **`jaeger`** — coletor OTLP + UI para visualizar traces localmente, sem depender de uma
-  ferramenta paga (ver [Observabilidade](#observabilidade-opentelemetry))
+- **Entrada de tráfego:** o API Gateway roteia cada prefixo de caminho para a NLB interna, que tem um
+  listener por serviço (porta = NodePort do serviço). O `autenticacao` emite o token da oficina; a
+  Lambda emite o do cliente a partir do CPF.
+- **Comunicação síncrona (HTTP):** só a OS consulta outros serviços — Cadastro (cliente, veículo,
+  serviço) e PecasInsumos (peça e disponibilidade) —, repassando o token recebido. A Lambda consulta
+  o Cadastro. REST complementa a mensageria, não a substitui.
+- **Comunicação assíncrona (eventos):** OS, PecasInsumos e Pagamento trocam os eventos da
+  [Saga](#saga-coreografada) por SNS/SQS. Cadastro e Autenticação não usam mensageria.
+- **Bancos:** três PostgreSQL (uma instância RDS por serviço) e uma tabela DynamoDB; nenhum serviço
+  acessa o banco de outro. O `autenticacao` não tem banco.
+- **Observabilidade:** todos os serviços exportam traces, métricas e logs por OTLP para o New Relic,
+  cada um com o próprio `service.name`; o trace atravessa as mensagens.
 
-As **migrations são aplicadas automaticamente** na inicialização da API (`MigrateAsync()` em
-`Program.cs`). Nenhum comando manual é necessário.
+Os desenhos completos (componentes, infraestrutura, deploy, sequência de abertura da OS e Saga)
+estão em [`docs/arquitetura/diagramas/`](docs/arquitetura/diagramas/).
 
-### Pontos de acesso
+## Os serviços e a justificativa da divisão
 
-| Serviço | URL |
+| Serviço | Repositório | Responsabilidade | Banco | Porta local | NodePort / NLB |
+|---|---|---|---|---|---|
+| **ordens-servico** | este (`oficina-mecanica-app`) | ciclo de vida da OS e do orçamento; orquestra o fluxo no sentido de negócio e participa da Saga | PostgreSQL | 8080 | 30080 |
+| **autenticacao** | [`oficina-mecanica-autenticacao`](https://github.com/gabrielMauad/oficina-mecanica-autenticacao) | login da oficina e emissão do JWT (papel `Oficina`) | — | 8081 | 30081 |
+| **cadastro** | [`oficina-mecanica-cadastro`](https://github.com/gabrielMauad/oficina-mecanica-cadastro) | clientes, veículos e catálogo de serviços | PostgreSQL | 8082 | 30082 |
+| **pecas-insumos** | [`oficina-mecanica-pecas-insumos`](https://github.com/gabrielMauad/oficina-mecanica-pecas-insumos) | estoque de peças; baixa e estorno atômicos | PostgreSQL | 8083 | 30083 |
+| **pagamento** | [`oficina-mecanica-pagamento`](https://github.com/gabrielMauad/oficina-mecanica-pagamento) | cobrança do orçamento aprovado (mock do Mercado Pago) | DynamoDB | 8084 | 30084 |
+
+**Por que essa divisão** (decisão registrada na [ADR-009](docs/arquitetura/adrs/009-decomposicao-em-microsservicos.md)):
+
+- **Um serviço por Bounded Context do monólito modular, mais Pagamento.** O monólito já tinha
+  fronteiras físicas entre Cadastro, PecasInsumos, OrdensServico e Autenticacao — um projeto por
+  camada por módulo, sem referências cruzadas, um schema por módulo. Extrair cada módulo é mover os
+  seus projetos para um repositório novo e trocar os adapters (consulta em processo → HTTP; barramento
+  em memória → mensageria); Domain e Application não mudam. Dividir por outro critério (como
+  Billing/Execução, o exemplo do enunciado) obrigaria a romper fronteiras que já funcionavam —
+  Execução e Produção, por exemplo, é só um status da OS, sem regra de negócio própria.
+- **Pagamento é serviço novo.** O fluxo da OS não tinha pagamento e o enunciado o exige (Mercado Pago
+  ou um mock que imite o fluxo). Ele acontece **depois da aprovação do orçamento e antes da
+  execução**, pelo canal digital da oficina: a OS só é executada com o pagamento aprovado.
+- **NoSQL no Pagamento.** O enunciado exige pelo menos um banco relacional e um não relacional. O
+  Pagamento é o lugar natural do NoSQL: os registros são acessados por chave (OS + orçamento), sem
+  junções — **DynamoDB**, com `OrdemServicoId` como chave de partição e `OrcamentoId` como chave de
+  ordenação. Não foi preciso reescrever nenhum banco SQL já funcionando (mover o Cadastro, por
+  exemplo, quebraria a Lambda de autenticação por CPF).
+- **Autenticacao sem banco.** O login da oficina é simulado — a credencial do administrador vem de
+  configuração —, então não há dado a persistir. A regra do enunciado pede banco próprio para quem
+  persiste; não pede banco para quem não persiste.
+- **Banco por serviço, isolado pela infraestrutura.** Cada PostgreSQL é uma instância RDS própria,
+  criada por `for_each` no repositório de infra com segredo próprio no Secrets Manager.
+- **`SharedKernel` e contratos de mensagem duplicados em cada repositório**, com os mesmos namespace
+  e nomes de tipo (o MassTransit roteia pelo nome completo do tipo). Extrair para um pacote NuGet
+  compartilhado é evolução futura.
+- **Autenticação entre serviços:** JWT HS256 com segredo compartilhado
+  ([ADR-001](docs/arquitetura/adrs/001-jwt-hs256-segredo-compartilhado.md)), validado por cada serviço.
+  Consumidores de fila não fazem chamadas HTTP — os eventos carregam o que precisam.
+
+## Saga coreografada
+
+O fluxo da OS atravessa três bancos, então não há transação única: a consistência vem de uma
+**Saga coreografada** ([ADR-010](docs/arquitetura/adrs/010-saga-coreografada-com-masstransit.md)).
+Cada serviço publica um evento quando termina a sua etapa e reage aos eventos dos outros; se uma
+etapa falha, os demais **desfazem** o que já fizeram (compensação).
+
+**Por que coreografia e não orquestração:**
+
+- o padrão de **integration events já existia** no código da Fase 3 (`IIntegrationEventBus`,
+  `IIntegrationEventHandler<T>`) — a Saga o estende, sem introduzir um componente novo;
+- são **poucos participantes** (três serviços) e o fluxo é **linear**, com poucos desvios;
+- **não há ponto central de falha**: um orquestrador indisponível pararia todas as OS em andamento —
+  e, para ser orquestração de verdade, ele teria de controlar todas as etapas, guardar o estado da
+  Saga e tratar falhas e compensações, ou seja, um sexto serviço com estado próprio;
+- cada compensação fica no serviço que conhece o estado a desfazer (o PecasInsumos estorna o próprio
+  estoque; a OS rejeita o próprio orçamento).
+
+### Fluxo completo
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Oficina
+    actor Cliente
+    participant OS as ordens-servico<br/>(PostgreSQL)
+    participant Bus as SNS / SQS
+    participant PI as pecas-insumos<br/>(PostgreSQL)
+    participant PG as pagamento<br/>(DynamoDB)
+    participant MP as Mock do<br/>Mercado Pago
+
+    Oficina->>OS: POST /ordens-servico/completa<br/>(ou diagnóstico → registrar-diagnostico)
+    OS->>OS: OS AguardandoAprovacao, orçamento Enviado
+    OS-->>Bus: OrcamentoGerado (peças e quantidades)
+    Bus-->>PI: OrcamentoGerado
+    PI->>PI: baixa TODAS as peças numa transação
+
+    Note over OS,PI: se a baixa falhar, vale a compensação 3 (abaixo)
+
+    Cliente->>OS: PATCH /{id}/aprovar-orcamento
+    OS->>OS: orçamento Aprovado (OS segue AguardandoAprovacao)
+    OS-->>Bus: OrcamentoAprovado (cliente, valor total)
+    Bus-->>PG: OrcamentoAprovado
+    PG->>PG: cria pagamento Pendente (idempotente)
+
+    Cliente->>PG: POST /pagamentos/ordens-servico/{id}/pagar<br/>{"titularCartao": "APRO" | "OTHE"}
+    PG->>MP: POST /oauth/token (client credentials)
+    MP-->>PG: access_token
+    PG->>MP: POST /v1/payments (Bearer)
+    MP-->>PG: approved | rejected
+
+    alt titular APRO — pagamento aprovado
+        PG->>PG: pagamento Aprovado
+        PG-->>Bus: PagamentoAprovado
+        Bus-->>OS: PagamentoAprovado
+        OS->>OS: AguardandoAprovacao → EmExecucao<br/>(só se o orçamento do evento está Aprovado)
+        Oficina->>OS: PATCH /{id}/finalizar
+        OS->>OS: Finalizada (cliente notificado)
+        Oficina->>OS: PATCH /{id}/concluir
+        OS->>OS: Entregue
+    else outro titular, ex. OTHE — pagamento recusado (compensação 1)
+        PG->>PG: pagamento Recusado (cc_rejected_other_reason)
+        PG-->>Bus: PagamentoRecusado
+        Bus-->>OS: PagamentoRecusado
+        OS->>OS: orçamento Aprovado → Rejeitado<br/>(OS segue AguardandoAprovacao)
+        OS-->>Bus: OrcamentoRejeitado (peças)
+        Bus-->>PI: OrcamentoRejeitado
+        PI->>PI: estorna TODAS as peças numa transação
+    end
+```
+
+A OS **não ganha status novo**: o ciclo do pagamento (`Pendente` → `Aprovado` | `Recusado` |
+`Cancelado`) é interno ao serviço de Pagamento, e a OS passa a `EmExecucao` **somente** pelo evento
+`PagamentoAprovado` — a rota `PATCH /api/v1/ordens-servico/{id}/executar` deixou de existir.
+
+### Eventos
+
+| Evento | Publicado por | Consumido por | Efeito no consumidor |
+|---|---|---|---|
+| `OrcamentoGerado` | ordens-servico | pecas-insumos | baixa **atômica** de todas as peças; se falhar, publica `EstoqueBaixaFalhou` |
+| `OrcamentoRejeitado` | ordens-servico (cliente rejeita **ou** pagamento recusado) | pecas-insumos | estorno atômico de todas as peças |
+| `EstoqueBaixaFalhou` | pecas-insumos | ordens-servico; pagamento | **OS:** orçamento → `Rejeitado`, sem publicar `OrcamentoRejeitado`. **Pagamento:** se houver pagamento `Pendente` do orçamento, vai a `Cancelado` (sem evento) |
+| `OrcamentoAprovado` | ordens-servico | pagamento | cria o pagamento `Pendente` |
+| `PagamentoAprovado` | pagamento | ordens-servico | OS `AguardandoAprovacao` → `EmExecucao`, só se o orçamento do evento estiver `Aprovado` |
+| `PagamentoRecusado` | pagamento | ordens-servico | compensação: orçamento `Aprovado` → `Rejeitado` + publica `OrcamentoRejeitado`; a OS segue `AguardandoAprovacao` |
+
+### Compensações
+
+| Falha | Compensação |
 |---|---|
-| API REST | `http://localhost:8080/api/v1/` |
-| Scalar (docs interativa) | `http://localhost:8080/scalar` |
-| Health checks | `http://localhost:8080/healthz` (agregado), `/healthz/live`, `/healthz/ready` |
-| Jaeger UI (traces) | `http://localhost:16686` |
-| PostgreSQL | `localhost:5432` — user/pass: `oficina` / `oficina-dev-pass` |
+| **Pagamento recusado** | OS rejeita o orçamento aprovado → publica `OrcamentoRejeitado` → PecasInsumos **estorna as peças**. A OS segue `AguardandoAprovacao`, apta a novo diagnóstico e orçamento |
+| **Orçamento rejeitado pelo cliente** | OS publica `OrcamentoRejeitado` → PecasInsumos **estorna as peças** (ainda não há pagamento) |
+| **Falha na baixa de estoque** | PecasInsumos publica `EstoqueBaixaFalhou` → OS rejeita o orçamento **sem estorno** (a baixa é atômica: nada foi baixado) e o Pagamento cancela um pagamento `Pendente`, se existir |
+
+**O que é retry, não compensação:** uma exceção técnica ao processar uma mensagem (banco
+indisponível, timeout) é reentregue pelo MassTransit — três reentregas, após 1 s, 5 s e 10 s — antes
+de desistir. Registrar e alertar uma falha (por exemplo, e-mail do orçamento que não pôde ser
+enviado, ou `PagamentoAprovado` de um orçamento que não está mais `Aprovado`) também é tratamento de
+erro, não compensação. Os consumidores toleram reentrega: se o estado já reflete o evento, registram
+log e retornam sem erro.
+
+> Detalhes, diagramas das três compensações e limitações conhecidas (sem outbox, sem DLQ gerenciada,
+> corrida entre pagamento e falha de estoque) em
+> [`docs/arquitetura/diagramas/saga.md`](docs/arquitetura/diagramas/saga.md).
+
+## Tecnologias e por que foram escolhidas
+
+| Tecnologia | Uso | Por quê |
+|---|---|---|
+| **.NET 10 / ASP.NET Core** | todos os serviços | stack do projeto desde a Fase 1 |
+| **Clean Architecture + DDD** | todos os serviços | mantida do monólito; a Regra de Dependência é forçada por referências de projeto |
+| **MediatR 12 + FluentValidation** | commands, queries e pipeline (validação, log, transação) | padrão existente; a Saga não alterou Application/Domain |
+| **MassTransit 8** | publicação e consumo de eventos | licença aberta (a série 9 é comercial); propaga o `traceparent` W3C nas mensagens |
+| **Amazon SNS + SQS** | transporte da mensageria | gerenciados e disponíveis na AWS Academy, sem broker no cluster; o MassTransit cria tópicos e filas na subida, sem Terraform de filas |
+| **PostgreSQL 16 (RDS), uma instância por serviço** | OS, Cadastro e PecasInsumos | banco relacional já em uso; instância própria garante o isolamento pela infraestrutura |
+| **Amazon DynamoDB** | Pagamento | banco não relacional exigido; acesso por chave, sem junções |
+| **Mock do Mercado Pago** | processador de pagamento | aceito no lugar da integração real; imita o fluxo (token por credencial de cliente → pagamento), consumido por HTTP |
+| **OpenTelemetry → New Relic** | traces, métricas e logs | observabilidade da Fase 3, agora distribuída ([RFC-004](docs/arquitetura/rfcs/004-ferramenta-de-observabilidade.md)) |
+| **Docker, Kubernetes (EKS), HPA** | execução | um Deployment, Service NodePort e HPA (1–3 réplicas, 50% de CPU) por serviço |
+| **Terraform** | infraestrutura | repositórios próprios para cluster/rede/API Gateway/ECR, bancos e Lambda |
+| **AWS Lambda (.NET 8) + API Gateway + NLB** | autenticação por CPF e entrada de tráfego | exigidos pela Fase 3, mantidos |
+| **GitHub Actions** | CI/CD independente por serviço | build → teste → qualidade → imagem (ECR) → deploy (EKS) → smoke test |
+| **xUnit v3, Moq, Testcontainers** | testes unitários e de integração | padrão existente |
+| **Reqnroll** | testes BDD | fluxo da Saga em Gherkin, no OrdensServico |
+| **SonarCloud** | análise estática e cobertura | integrado ao CI (ver [Testes](#testes-bdd-e-cobertura)) |
+| **LocalStack, Jaeger** | ambiente local | SNS/SQS/DynamoDB e traces sem depender da nuvem |
+
+## Mock do Mercado Pago
+
+O pagamento acontece no serviço [`pagamento`](https://github.com/gabrielMauad/oficina-mecanica-pagamento),
+que **consome por HTTP** um mock do Mercado Pago hospedado no próprio serviço
+(`MercadoPago__BaseUrl`), como consumiria a API real — por isso as chamadas aparecem nos traces.
+
+**O que o mock simula** do fluxo real:
+
+1. `POST /mock/mercadopago/oauth/token` — troca `client_id` / `client_secret`
+   (`grant_type=client_credentials`) por um `access_token`; 401 se as credenciais não forem as
+   configuradas. O token é assinado (HMAC) com as credenciais, então qualquer réplica do serviço o
+   valida.
+2. `POST /mock/mercadopago/v1/payments` — com o token como Bearer, cria o pagamento e devolve
+   `approved` / `accredited` ou `rejected` / `cc_rejected_other_reason`.
+
+O adapter do Pagamento faz exatamente essas duas chamadas, nessa ordem.
+
+**Como pagar com `APRO` ou `OTHE`** (convenção dos cartões de teste do Mercado Pago, aplicada ao
+`titularCartao`): com um token `Cliente` dono da OS e um pagamento `Pendente` (criado quando o cliente
+aprova o orçamento):
+
+```bash
+curl -X POST http://localhost:8084/api/v1/pagamentos/ordens-servico/{ordemServicoId}/pagar \
+  -H "Authorization: Bearer $TOKEN_CLIENTE" -H "Content-Type: application/json" \
+  -d '{"titularCartao": "APRO"}'
+```
+
+| `titularCartao` | Resultado | Evento publicado | Efeito na OS |
+|---|---|---|---|
+| `APRO` | `Aprovado` | `PagamentoAprovado` | `AguardandoAprovacao` → `EmExecucao` |
+| qualquer outro valor, ex. `OTHE` | `Recusado` (`cc_rejected_other_reason`) | `PagamentoRecusado` | orçamento `Rejeitado` e estorno das peças |
+
+Isso permite demonstrar os dois caminhos da Saga ao vivo. **O que o mock não faz:** webhooks, estorno
+de pagamento, validação real de cartão ou outros status do Mercado Pago. A integração real fica
+fora do escopo. Na AWS, o mock **não** tem rota própria no API Gateway; a limitação conhecida (a
+rota técnica `/pagamento/{proxy+}` também o alcança, protegido pelas credenciais e pelo Bearer) está
+no README do serviço.
+
+## Repositórios do projeto
+
+| Repositório | Conteúdo |
+|---|---|
+| [`oficina-mecanica-app`](https://github.com/gabrielMauad/oficina-mecanica-app) | **este** — serviço OrdensServico e documentação geral |
+| [`oficina-mecanica-cadastro`](https://github.com/gabrielMauad/oficina-mecanica-cadastro) | serviço Cadastro |
+| [`oficina-mecanica-pecas-insumos`](https://github.com/gabrielMauad/oficina-mecanica-pecas-insumos) | serviço PecasInsumos |
+| [`oficina-mecanica-pagamento`](https://github.com/gabrielMauad/oficina-mecanica-pagamento) | serviço Pagamento (DynamoDB + mock do Mercado Pago) |
+| [`oficina-mecanica-autenticacao`](https://github.com/gabrielMauad/oficina-mecanica-autenticacao) | serviço Autenticação (login da oficina, sem banco) |
+| [`oficina-mecanica-infra-k8s`](https://github.com/gabrielMauad/oficina-mecanica-infra-k8s) | Terraform: EKS, NLB, API Gateway, ECR por serviço, segredo da aplicação |
+| [`oficina-mecanica-infra-db`](https://github.com/gabrielMauad/oficina-mecanica-infra-db) | Terraform: três instâncias RDS PostgreSQL, tabela DynamoDB e segredos |
+| [`oficina-mecanica-lambda-auth`](https://github.com/gabrielMauad/oficina-mecanica-lambda-auth) | Lambda de autenticação do cliente por CPF e sua rota no API Gateway |
 
 ---
 
-## Deploy na Nuvem (AWS)
+# Serviço OrdensServico
 
-A partir da Fase 3, a aplicação roda em **nuvem** (AWS Academy Learner Lab) — ver
-[RFC-002](docs/arquitetura/rfcs/002-escolha-do-provedor-de-nuvem.md) para a escolha do provedor e
-as restrições reais da conta, e
-[ADR-005](docs/arquitetura/adrs/005-quatro-repositorios-e-estrategia-de-branches.md) para a
-divisão em quatro repositórios. O cluster **kind** local da Fase 2 (pasta `infra/`, Terraform do
-cluster efêmero criado dentro do runner) foi **removido** deste repositório — a infraestrutura
-agora é persistente e gerenciada pelos repositórios de infra.
+## Propósito e responsabilidade
 
-### Os quatro repositórios e a ordem de deploy
+Dono do **ciclo de vida da ordem de serviço e do orçamento**: abertura (simples ou completa),
+diagnóstico, geração e envio do orçamento, decisão do cliente, execução, finalização e entrega. Na
+Saga ele:
 
-O merge de cada repositório de infraestrutura dispara `apply` automático — a ordem importa porque
-há dependência real entre eles (outputs consumidos via `terraform_remote_state`, ECR/segredo
-consumidos pela pipeline deste repositório, tabelas consumidas pela Lambda):
+- **publica** `OrcamentoGerado`, `OrcamentoAprovado` e `OrcamentoRejeitado`;
+- **consome** `PagamentoAprovado` (inicia a execução), `PagamentoRecusado` (compensa rejeitando o
+  orçamento) e `EstoqueBaixaFalhou` (rejeita o orçamento sem estorno);
+- **consulta por HTTP** o Cadastro (cliente, veículo, serviço) e o PecasInsumos (peça e
+  disponibilidade), repassando o token recebido.
+
+Banco: **PostgreSQL próprio** (schema `ordem_servico`; migrations aplicadas na partida). Status da OS:
+`Recebida → EmDiagnostico → AguardandoAprovacao → EmExecucao → Finalizada → Entregue`; o orçamento
+tem `Pendente | Enviado | Aprovado | Rejeitado`.
+
+## Arquitetura do serviço
+
+Clean Architecture em projetos físicos distintos; a Regra de Dependência é verificada em compilação
+pelas referências de projeto.
+
+```mermaid
+flowchart LR
+    cliente["Cliente / Oficina<br/>via API Gateway"]
+
+    subgraph svc["ordens-servico"]
+        direction TB
+        web["Web<br/>OrdemServicoApiController<br/>[Authorize] por papel"]
+        adapters["Adapters<br/>Controller CA, Presenter, ViewModels<br/>Gateways (implementam as ports)"]
+        app["Application<br/>commands / queries (MediatR)<br/>handlers de domain events<br/>handlers de integration events<br/>ports: IClienteGateway, IPecaDisponibilidadeGateway..."]
+        dom["Domain<br/>OrdemServico, Orcamento<br/>máquina de estados e domain events"]
+        infra["Infrastructure<br/>EF Core / Npgsql<br/>clientes HTTP tipados<br/>MassTransit: bus e consumers"]
+        web --> adapters --> app --> dom
+        infra -.->|implementa| app
+        infra -.->|implementa| adapters
+    end
+
+    db[("PostgreSQL<br/>ordens-servico")]
+    cad["cadastro"]
+    pec["pecas-insumos"]
+    broker{{"SNS + SQS"}}
+
+    cliente -->|HTTP| web
+    infra --> db
+    infra -->|"HTTP + Bearer repassado"| cad
+    infra -->|"HTTP + Bearer repassado"| pec
+    infra <-.->|"publica: OrcamentoGerado, OrcamentoAprovado, OrcamentoRejeitado<br/>consome: PagamentoAprovado, PagamentoRecusado, EstoqueBaixaFalhou"| broker
+```
+
+- **Ports e adapters:** a Application depende só de *ports* (`IClienteGateway`, `IVeiculoGateway`,
+  `IServicoGateway`, `IPecaDisponibilidadeGateway`, `IPecaInsumoInfoGateway`, `IIntegrationEventBus`).
+  Os adapters de Cadastro e PecasInsumos são clientes HTTP tipados (um `DelegatingHandler` repassa o
+  `Authorization` da requisição de entrada; 404 vira `null`); o adapter do barramento publica pelo
+  `IPublishEndpoint` do MassTransit. Application e Domain **não** referenciam MassTransit, AWS SDK,
+  `HttpClient`, EF Core ou ASP.NET.
+- **Consumers MassTransit** (camada externa) apenas delegam ao `IIntegrationEventHandler<T>` da
+  Application; em falha técnica registram `oficina.integracoes.falhas` e relançam a exceção para o
+  retry atuar.
+- **Eventos publicados depois do commit:** os domain events viram integration events enfileirados em
+  `IPendingIntegrationEvents` e publicados pelo `TransactionBehavior` após o `SaveChanges`.
+- **O e-mail do orçamento não derruba a Saga:** se montar ou enviar o e-mail falhar, o erro é
+  registrado em log e na métrica de falhas, e `OrcamentoGerado` é publicado do mesmo jeito.
+
+Diagramas C4 e a sequência de abertura da OS em
+[`docs/arquitetura/diagramas/`](docs/arquitetura/diagramas/).
+
+## API, papéis e eventos
+
+### Rotas deste serviço
+
+| Rota | Papel |
+|---|---|
+| `POST /api/v1/ordens-servico` — abre a OS (`Recebida`) | `Oficina` |
+| `POST /api/v1/ordens-servico/completa` — abre já com serviços e peças | `Oficina` |
+| `GET /api/v1/ordens-servico?clienteId=...` | `Oficina` |
+| `GET /api/v1/ordens-servico/acompanhamento` — só as OS do cliente do token | `Cliente` |
+| `GET /api/v1/ordens-servico/{id}` e `/{id}/status` | `Cliente` (só o dono) ou `Oficina` |
+| `PATCH /{id}/iniciar-diagnostico`, `/{id}/registrar-diagnostico` | `Oficina` |
+| `PATCH /{id}/aprovar-orcamento`, `/{id}/rejeitar-orcamento` | `Cliente` (só o dono) |
+| `PATCH /{id}/finalizar`, `/{id}/concluir` | `Oficina` |
+
+~~`PATCH /{id}/executar`~~ **foi removida**: a OS passa a `EmExecucao` pelo evento `PagamentoAprovado`.
+Um `Cliente` que acessa a OS de outro recebe **403**, não 404. Além das rotas de negócio, o serviço
+expõe `/healthz`, `/healthz/live`, `/healthz/ready`, `/openapi/v1.json` e `/scalar`.
+
+### Rotas do sistema, por serviço (via API Gateway)
+
+| Serviço | Rotas | Papel |
+|---|---|---|
+| autenticacao | `POST /api/v1/auth/login` | anônima |
+| Lambda | `POST /auth/cpf` | anônima |
+| cadastro | `/api/v1/clientes` (inclui `GET /clientes/documento/{documento}`, usada pela Lambda), `/api/v1/veiculos` (e `GET /clientes/{id}/veiculos`), `/api/v1/servicos` | `Oficina` |
+| pecas-insumos | `/api/v1/pecas-insumos` (inclui `GET /{id}/disponibilidade?quantidade=n` e `PATCH /{id}/estoque/entrada` e `/saida`) | `Oficina` |
+| ordens-servico | `/api/v1/ordens-servico/**` (tabela acima) | `Oficina` / `Cliente` |
+| pagamento | `GET /api/v1/pagamentos/ordens-servico/{ordemServicoId}` | `Cliente` (só o dono) ou `Oficina` |
+| pagamento | `POST /api/v1/pagamentos/ordens-servico/{ordemServicoId}/pagar` | `Cliente` (só o dono) |
+
+Rotas técnicas por serviço, com reescrita de caminho (usadas pelo smoke test e para abrir o OpenAPI de
+cada serviço): `<endpoint>/<serviço>/healthz/ready` e `<endpoint>/<serviço>/openapi/v1.json`.
+
+### Eventos deste serviço
+
+| Direção | Evento | Efeito |
+|---|---|---|
+| publica | `OrcamentoGerado` | orçamento gerado (abertura completa ou diagnóstico) → PecasInsumos baixa as peças |
+| publica | `OrcamentoAprovado` | cliente aprovou → Pagamento cria o pagamento `Pendente` |
+| publica | `OrcamentoRejeitado` | cliente rejeitou **ou** pagamento recusado → PecasInsumos estorna |
+| consome | `PagamentoAprovado` | `AguardandoAprovacao` → `EmExecucao`, se o orçamento do evento está `Aprovado` |
+| consome | `PagamentoRecusado` | orçamento `Aprovado` → `Rejeitado` e publica `OrcamentoRejeitado` |
+| consome | `EstoqueBaixaFalhou` | orçamento → `Rejeitado`, sem `OrcamentoRejeitado` |
+
+Filas deste serviço: `ordens-servico-pagamento-aprovado`, `ordens-servico-pagamento-recusado` e
+`ordens-servico-estoque-baixa-falhou`.
+
+## Configuração
+
+| Chave | Uso |
+|---|---|
+| `ConnectionStrings__Default` | PostgreSQL do serviço (na nuvem, com `SSL Mode=Require`) |
+| `Jwt__Secret`, `Jwt__Audience`, `Jwt__ValidIssuers__0` / `__1` | validação do JWT (`oficina-mecanica-api`; emissores `oficina-mecanica-app` e `oficina-mecanica-auth`) |
+| `Mensageria__Transporte` | `AmazonSqs` (padrão; AWS e LocalStack) ou `InMemory` (testes) |
+| `Mensageria__Regiao` | `us-east-1` |
+| `Mensageria__ServiceUrl`, `Mensageria__AccessKey`, `Mensageria__SecretKey` | **só local** (LocalStack); vazios na AWS, onde vale a cadeia padrão de credenciais do SDK |
+| `Servicos__Cadastro__BaseUrl`, `Servicos__PecasInsumos__BaseUrl` | URLs dos serviços consultados por HTTP; obrigatórias, validadas na partida |
+| `OpenApi__Enabled` | liga/desliga Scalar e OpenAPI |
+| `OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_*` | observabilidade; `OTEL_SERVICE_NAME` padrão `oficina-mecanica-ordens-servico` |
+
+## Execução local
+
+Cada repositório tem o próprio `docker-compose.yml` com o serviço e as dependências exclusivas dele
+(o Postgres próprio). As dependências **compartilhadas** — a rede Docker `oficina-local`, o
+**LocalStack** (SNS, SQS e DynamoDB) e o **Jaeger** (traces) — sobem a partir **deste repositório**,
+em `docker-compose.infra.yml`.
+
+**Pré-requisitos:** Docker + Docker Compose v2 e Git. (.NET SDK 10 só para rodar os testes fora de
+contêiner.)
+
+```bash
+# 1) clonar os cinco serviços lado a lado
+for r in oficina-mecanica-app oficina-mecanica-autenticacao oficina-mecanica-cadastro \
+         oficina-mecanica-pecas-insumos oficina-mecanica-pagamento; do
+  git clone https://github.com/gabrielMauad/$r.git
+done
+
+# 2) infraestrutura compartilhada (uma vez): rede oficina-local + LocalStack + Jaeger
+cd oficina-mecanica-app
+docker compose -f docker-compose.infra.yml up -d
+
+# 3) este serviço (OrdensServico) + o seu Postgres
+docker compose up -d --build
+
+# 4) os demais serviços, cada um no seu repositório
+(cd ../oficina-mecanica-autenticacao  && docker compose up -d --build)
+(cd ../oficina-mecanica-cadastro      && docker compose up -d --build)
+(cd ../oficina-mecanica-pecas-insumos && docker compose up -d --build)
+(cd ../oficina-mecanica-pagamento     && docker compose up -d --build)
+```
+
+Para percorrer a **Saga completa** os cinco serviços precisam estar no ar: a OS consulta Cadastro e
+PecasInsumos por HTTP, e Pagamento e PecasInsumos trocam eventos com ela pelo LocalStack. As
+migrations rodam sozinhas na partida de cada serviço com banco.
+
+| Serviço | URL local | Observação |
+|---|---|---|
+| ordens-servico | `http://localhost:8080` | PostgreSQL em `localhost:5432` |
+| autenticacao | `http://localhost:8081` | sem banco |
+| cadastro | `http://localhost:8082` | PostgreSQL em `localhost:5433` |
+| pecas-insumos | `http://localhost:8083` | PostgreSQL em `localhost:5434` |
+| pagamento | `http://localhost:8084` | DynamoDB no LocalStack; tabela criada na partida |
+| Scalar (docs interativa) | `http://localhost:<porta>/scalar` | um por serviço |
+| Health checks | `http://localhost:<porta>/healthz/ready` | `/healthz/live` e `/healthz` também |
+| Jaeger UI (traces) | `http://localhost:16686` | selecione o serviço e abra o trace |
+| LocalStack | `http://localhost:4566` | SNS, SQS e DynamoDB |
+
+Credenciais de desenvolvimento (somente local): banco `oficina` / `oficina-dev-pass`; admin da
+oficina `admin@oficina.com` / `admin123`; `Jwt__Secret=docker-dev-secret-key-replace-in-prod-000`;
+credenciais do mock do Mercado Pago `mp-dev-client` / `mp-dev-secret`.
+
+```bash
+# todos prontos? (esperado: 200 nas cinco portas)
+for p in 8080 8081 8082 8083 8084; do echo -n "$p: "; curl -s -o /dev/null -w "%{http_code}\n" localhost:$p/healthz/ready; done
+```
+
+**Token do cliente em ambiente local.** A Lambda de autenticação por CPF só existe na nuvem; local,
+o token `Cliente` é um JWT HS256 assinado com o mesmo `Jwt__Secret`, com as claims que a Lambda
+emitiria (`iss=oficina-mecanica-auth`, `aud=oficina-mecanica-api`, `role=Cliente`, `sub=<id do cliente>`):
+
+```bash
+node -e '
+const c=require("crypto"),b=x=>Buffer.from(x).toString("base64url");
+const h=b(JSON.stringify({alg:"HS256",typ:"JWT"})),now=Math.floor(Date.now()/1000);
+const p=b(JSON.stringify({iss:"oficina-mecanica-auth",aud:"oficina-mecanica-api",sub:process.argv[1],role:"Cliente",iat:now,exp:now+3600}));
+console.log(h+"."+p+"."+c.createHmac("sha256","docker-dev-secret-key-replace-in-prod-000").update(h+"."+p).digest("base64url"))' <clienteId>
+```
+
+**Roteiro da Saga na coleção.** A pasta **"Fluxo da Saga"** da [coleção](#apis--documentação-e-coleções)
+reúne as requisições na ordem: login → cadastros → abertura da OS → aprovar → consultar o pagamento →
+pagar (`APRO` ou `OTHE`) → conferir a OS → finalizar → concluir. Para a compensação, pague com `OTHE`
+e confira a OS (`orcamentos: Rejeitado`), o estoque estornado e o pagamento `Recusado`.
+
+Os guias [`teste-cenario-feliz`](docs/guias/teste-cenario-feliz.md) e
+[`teste-cenarios-alternativos`](docs/guias/teste-cenarios-alternativos.md) descrevem os fluxos de OS
+das fases anteriores em uma única URL; ver o aviso no início de cada um.
+
+## Testes, BDD e cobertura
+
+```bash
+# Tudo: unitários + integração + BDD (integração e BDD precisam de Docker — Testcontainers PostgreSQL)
+dotnet test OficinaMecanica.slnx
+
+# Só os projetos que não usam Docker: domínio, Application, adapters, infraestrutura e SharedKernel
+for p in tests/Modules/OrdensServico/OrdemServico.Domain.Tests \n         tests/Modules/OrdensServico/OrdemServico.Application.Tests \n         tests/Modules/OrdensServico/OrdemServico.Adapters.Tests \n         tests/Modules/OrdensServico/OrdemServico.Infrastructure.Tests \n         tests/SharedKernel/SharedKernel.Application.Tests; do dotnet test $p; done
+
+# Só integração (Docker)
+dotnet test tests/IntegrationTests
+```
+
+| Camada | Ferramenta | O que cobre |
+|---|---|---|
+| Domínio e Application | xUnit v3 + Moq | máquina de estados da OS e do orçamento, commands, handlers da Saga |
+| Infraestrutura / adapters | xUnit v3 + Moq | consumers, adapter do barramento, gateways HTTP |
+| Integração | `WebApplicationFactory` + Testcontainers.PostgreSql + test harness do MassTransit | a aplicação inteira com banco real, publicando e consumindo mensagens em memória |
+| **BDD** | **Reqnroll** (xUnit v3) | fluxo completo da OS e compensações da Saga |
+
+### BDD
+
+Fica em [`tests/OrdensServico.Bdd`](tests/OrdensServico.Bdd): a feature
+[`FluxoOrdemServico.feature`](tests/OrdensServico.Bdd/Features/FluxoOrdemServico.feature) (Gherkin
+em português) e os steps em `Steps/`. Os cenários:
+
+1. fluxo completo com pagamento aprovado, da abertura à entrega do veículo;
+2. pagamento recusado: devolve as peças e permite novo diagnóstico;
+3. falha na baixa de estoque: rejeita o orçamento sem estorno;
+4. pagamento aprovado de um orçamento já rejeitado não coloca a OS em execução;
+5. rejeição pelo cliente publica `OrcamentoRejeitado` para o estorno.
+
+Roda a aplicação inteira com um PostgreSQL real (Testcontainers). **Cadastro e PecasInsumos
+(chamadas HTTP) são simulados por gateways falsos**; **Pagamento e PecasInsumos (mensageria) são
+simulados publicando eventos e inspecionando as mensagens publicadas** pelo test harness do
+MassTransit — o BDD valida a OS como participante da Saga, não os outros serviços. Para rodar só o BDD
+(requer Docker):
+
+```bash
+dotnet test tests/OrdensServico.Bdd/OrdensServico.Bdd.csproj
+```
+
+### Cobertura (meta ≥ 80% por serviço)
+
+A cobertura de linhas é medida sobre todas as assemblies de `src/` (excluídos apenas migrations,
+`Program.cs` e código gerado — ver [`coverage.runsettings`](coverage.runsettings)) e o CI **falha**
+abaixo de 80%. Evidência no último run verde do CI (build & testes do PR #54):
+**93,6% de linhas e 85,1% de ramos** —
+[ver o passo "Gate de cobertura"](https://github.com/gabrielMauad/oficina-mecanica-app/actions/runs/43551781849).
+
+```bash
+dotnet test OficinaMecanica.slnx --settings coverage.runsettings --collect:"XPlat Code Coverage" --results-directory coverage-results/
+reportgenerator -reports:"coverage-results/**/coverage.opencover.xml" -targetdir:"coverage-report/" -reporttypes:Html
+```
+
+**SonarCloud:** o CI já executa a análise (passos `sonarscanner begin/end` com os resultados de
+cobertura), condicionada ao secret `SONAR_TOKEN` e às variables `SONAR_PROJECT_KEY` /
+`SONAR_ORGANIZATION` do repositório. <!-- sonarcloud-link --> O link público do projeto no
+SonarCloud será adicionado aqui quando a conta estiver configurada.
+
+## APIs — documentação e coleções
+
+| Recurso | Onde |
+|---|---|
+| **Scalar / OpenAPI** | local: `http://localhost:<porta>/scalar` e `/openapi/v1.json`; nuvem: `<endpoint>/<serviço>/openapi/v1.json` (ex.: `/ordens-servico/openapi/v1.json`) |
+| **Coleção Bruno** | [`docs/guias/collection_bruno.yml`](docs/guias/collection_bruno.yml) — todos os serviços, ambientes `Local` e `Nuvem` |
+| **Coleção Postman** | [`docs/guias/collection_postman.json`](docs/guias/collection_postman.json) + ambientes [`Local`](docs/guias/postman_environment_local.json) e [`Nuvem`](docs/guias/postman_environment_nuvem.json) — mesma cobertura da coleção Bruno |
+
+As duas coleções cobrem Autenticação, Cadastro, PecasInsumos, OrdensServico e Pagamento (incluindo a
+rota nova de cliente por documento e a de disponibilidade), a autenticação por CPF da Lambda, o mock do
+Mercado Pago (somente local) e a pasta **"Fluxo da Saga"**; a rota `/executar` não existe mais. O
+ambiente `Local` tem **uma URL por serviço** (`8080`–`8084`); o ambiente `Nuvem` aponta todos para o
+**API Gateway** (descoberto com o comando abaixo). Preencha `token_oficina` com o `token` de
+**Autenticação > Login**; `token_cliente` vem da Lambda (`POST /auth/cpf`, na nuvem) ou do JWT manual
+(local) descrito em [Execução local](#execução-local).
+
+## Autenticação e autorização
+
+Praticamente todos os endpoints exigem JWT HS256, e a autorização considera o **papel** do token —
+[RFC-001](docs/arquitetura/rfcs/001-estrategia-de-autenticacao.md) e
+[ADR-003](docs/arquitetura/adrs/003-dois-emissores-e-autorizacao-por-papel.md). O segredo é
+compartilhado e cada serviço apenas **valida** o token.
+
+| Papel | Quem é | Quem emite | Credencial |
+|---|---|---|---|
+| `Oficina` | operador da oficina | serviço **autenticacao** — `POST /api/v1/auth/login` | e-mail + senha |
+| `Cliente` | cliente da oficina | **Lambda** — `POST /auth/cpf` | CPF |
+
+Ambos os tokens valem 1 hora e vão em `Authorization: Bearer <token>`. Um `Cliente` só opera sobre
+recursos **do próprio cliente** (o `sub` do token é comparado com o dono da OS ou do pagamento); caso
+contrário, **403**. A OpenAPI/Scalar continua acessível sem autenticação
+([RFC-001 §8](docs/arquitetura/rfcs/001-estrategia-de-autenticacao.md)).
+
+## Observabilidade (OpenTelemetry + New Relic)
+
+Traces, métricas e logs via **OpenTelemetry .NET**, exportados por **OTLP** ao **New Relic**
+([RFC-004](docs/arquitetura/rfcs/004-ferramenta-de-observabilidade.md); correlação log↔trace em
+[ADR-004](docs/arquitetura/adrs/004-correlacao-via-traceid-w3c.md)). Cada serviço se identifica por
+`OTEL_SERVICE_NAME`:
+
+| Serviço | `service.name` |
+|---|---|
+| ordens-servico | `oficina-mecanica-ordens-servico` |
+| autenticacao | `oficina-mecanica-autenticacao` |
+| cadastro | `oficina-mecanica-cadastro` |
+| pecas-insumos | `oficina-mecanica-pecas-insumos` |
+| pagamento | `oficina-mecanica-pagamento` |
+
+- **Rastreamento distribuído:** a fonte `MassTransit` está registrada no tracer; o `traceparent`
+  atravessa as mensagens, então um único trace cobre requisição HTTP → publicação (`<Evento> send`) →
+  consumo (`<fila> receive` / `process`) → publicação seguinte. Localmente, no Jaeger; na nuvem, no
+  New Relic.
+- **Métricas de negócio** deste serviço (`OficinaMecanica.OrdensServico`:
+  `oficina.ordens_servico.abertas`, `oficina.ordens_servico.etapa.duracao`) e de falhas de
+  integração (`OficinaMecanica.Integracoes`: `oficina.integracoes.falhas`, por `evento` e
+  `handler`) — contrato em [`docs/arquitetura/metricas.md`](docs/arquitetura/metricas.md).
+- **Dashboard e alertas:** [`docs/observabilidade/`](docs/observabilidade/) — dashboard importável
+  com visão por serviço e da Saga, condições de alerta em NRQL e monitor sintético.
+- **CPU/memória do cluster** vêm do `nri-bundle` (Helm), instalado **somente pela pipeline deste
+  serviço** ([`k8s/observabilidade/newrelic-values.yaml`](k8s/observabilidade/newrelic-values.yaml)).
+- **Amostragem em 100%** (`AlwaysOnSampler`, ADR-004): deliberada para o volume do projeto, não
+  adequada a produção real. No ambiente `Testing` nada disso é registrado.
+
+## CI/CD
+
+Pipeline **independente por serviço**, em dois workflows do GitHub Actions:
+
+| Workflow | Gatilho | O que faz |
+|---|---|---|
+| [`ci.yml`](.github/workflows/ci.yml) | Pull Request → `main` | build, testes com cobertura, gate de 80% e SonarCloud (job `Build & Test`, exigido pela proteção da `main`) |
+| [`ci-cd.yml`](.github/workflows/ci-cd.yml) | push na `main`, `workflow_dispatch` | **build-test** → **docker-image** (Amazon ECR, tag = SHA) → **deploy** no EKS → smoke test `GET <endpoint>/ordens-servico/healthz/ready` pelo API Gateway |
+
+A proteção da `main` (Pull Request obrigatório e o job `Build & Test` como checagem exigida) é configuração do
+repositório no GitHub, não código: está ativa neste repositório e deve ter a mesma regra em cada repositório
+de serviço. O deploy cria
+o `Secret` `ordens-servico-secrets` em tempo de execução a partir do Secrets Manager (com
+`::add-mask::`), aplica ConfigMap, Deployment, Service e HPA, espera o `rollout` e instala o
+`nri-bundle`. Cada serviço tem pipelines equivalentes no próprio repositório.
+
+> Desenho do fluxo: [`docs/arquitetura/diagramas/fluxo-deploy.md`](docs/arquitetura/diagramas/fluxo-deploy.md).
+
+## Deploy na nuvem e a limitação da AWS Academy
+
+A infraestrutura é persistente e provisionada por Terraform em repositórios próprios; este
+repositório publica **apenas o seu serviço** nela. Ordem de provisionamento (há dependência real entre
+eles, via `terraform_remote_state` e recursos consumidos pelas pipelines):
 
 | Ordem | Repositório | Provisiona |
 |---|---|---|
-| 1 | [`oficina-mecanica-infra-k8s`](https://github.com/gabrielMauad/oficina-mecanica-infra-k8s) | Cluster **EKS**, NLB, **API Gateway**, **ECR**, segredo da aplicação |
-| 2 | [`oficina-mecanica-infra-db`](https://github.com/gabrielMauad/oficina-mecanica-infra-db) | **RDS PostgreSQL**, segredo do banco |
-| 3 | **Este repositório** (`oficina-mecanica-app`) | Imagem da API (publicada no ECR) + manifestos deste `k8s/` no cluster |
-| 4 | [`oficina-mecanica-lambda-auth`](https://github.com/gabrielMauad/oficina-mecanica-lambda-auth) | Function de autenticação por CPF + rota no API Gateway |
+| 1 | [`oficina-mecanica-infra-k8s`](https://github.com/gabrielMauad/oficina-mecanica-infra-k8s) | cluster **EKS** (nós `t3.medium`, 2–4), NLB com um listener por serviço, **API Gateway** com as rotas, um **ECR** por serviço, segredo da aplicação |
+| 2 | [`oficina-mecanica-infra-db`](https://github.com/gabrielMauad/oficina-mecanica-infra-db) | três **RDS PostgreSQL** (um por serviço, segredos próprios) e a tabela **DynamoDB** de pagamentos |
+| 3 | cada serviço (este repositório e os outros quatro) | imagem no ECR + manifestos `k8s/` do serviço no cluster |
+| 4 | [`oficina-mecanica-lambda-auth`](https://github.com/gabrielMauad/oficina-mecanica-lambda-auth) | Lambda de autenticação por CPF e a rota `POST /auth/cpf` |
 
-Este repositório precisa do ECR e do segredo criados por `infra-k8s` antes de poder publicar a
-imagem e criar o `Secret` do Kubernetes; a Lambda precisa das tabelas criadas pelas **migrations
-desta aplicação** para o fluxo completo de login por CPF funcionar de ponta a ponta.
-
-### Manifestos (`k8s/`)
-
-- **`base/`** — namespace e `ConfigMap` (variáveis não sensíveis). O `Secret` (`oficina-secrets`)
-  **não é commitado**: é criado pela pipeline (`ci-cd.yml`) a partir dos segredos do AWS Secrets
-  Manager, em tempo de deploy — nunca em texto plano no repositório.
-- **`app/`** — `Deployment` (imagem publicada no ECR), `Service` **NodePort** (porta 30080, alvo
-  fixo da NLB interna provisionada por `oficina-mecanica-infra-k8s` — não altere o tipo nem a
-  porta) e **HPA** (1 a 5 réplicas, 50% CPU).
-
-Não existe mais `k8s/database/`: o PostgreSQL em pod da Fase 2 foi substituído pelo RDS gerenciado
-(`oficina-mecanica-infra-db`); por isso o `Deployment` da API também não tem mais o initContainer
-`wait-for-postgres` (esperava um Service que deixou de existir).
-
-### Descobrir a URL pública da API
-
-Nunca fica hardcoded no código ou na documentação — o endpoint muda a cada recriação da
-infraestrutura:
+**Descobrir a URL da API** (nunca fica hardcoded; muda a cada recriação da infraestrutura):
 
 ```bash
 aws apigatewayv2 get-apis \
@@ -210,332 +707,67 @@ aws apigatewayv2 get-apis \
   --output text
 ```
 
-`<endpoint>/scalar` é a documentação interativa publicada; `<endpoint>/healthz/ready` é o alvo do
-smoke test da pipeline; `<endpoint>/auth/cpf` é a rota de autenticação por CPF (Function
-Serverless, repositório `oficina-mecanica-lambda-auth`).
-
-### Recuperar a senha do admin da oficina
-
-Gerada pelo Terraform de `oficina-mecanica-infra-k8s` (`random_password`) e nunca commitada:
+**Senha do admin da oficina** (gerada pelo Terraform de `oficina-mecanica-infra-k8s`, nunca commitada):
 
 ```bash
-aws secretsmanager get-secret-value \
-  --secret-id oficina-mecanica/dev/app \
+aws secretsmanager get-secret-value --secret-id oficina-mecanica/dev/app \
   --query SecretString --output text | jq -r .admin_senha
 ```
 
-### Limitação do deploy automático (ADR-006)
+**Limitação do deploy automático (AWS Academy).** A conta AWS Academy Learner Lab não permite criar IAM
+role nem provedor OIDC; as pipelines autenticam com **credenciais de sessão temporárias**
+(`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`), renovadas manualmente a cada
+sessão do laboratório em **cada repositório** com deploy
+([ADR-006](docs/arquitetura/adrs/006-credenciais-de-nuvem-no-cicd.md)). **Se o job `deploy` falhar na
+autenticação, não é pipeline quebrada — é a sessão expirada:** renove os três secrets do repositório
+(environment `aws-academy`) e reexecute via `workflow_dispatch`, sem precisar de um commit novo.
 
-A conta AWS Academy Learner Lab não permite criar IAM role nem provedor OIDC — as pipelines dos
-quatro repositórios autenticam com **credenciais de sessão temporárias**
-(`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_SESSION_TOKEN`), renovadas manualmente a cada
-sessão do laboratório (ver
-[ADR-006](docs/arquitetura/adrs/006-credenciais-de-nuvem-no-cicd.md)). **Se o job `deploy` falhar
-na autenticação, não é pipeline quebrada** — é a sessão expirada; renove os três secrets do
-repositório e reexecute via `workflow_dispatch`, sem precisar de um commit novo.
+Manifestos em [`k8s/`](k8s/): `00-namespace.yaml` (compartilhado), `01-configmap.yaml`, `10-deployment.yaml`
+(probes `/healthz/live` e `/healthz/ready`, requests 100m/256Mi, limits 500m/512Mi), `11-service.yaml`
+(**NodePort 30080**, alvo do listener da NLB — não altere) e `12-hpa.yaml` (1 a 3 réplicas, 50% de CPU).
 
-> Desenho da infraestrutura completa: [`diagramas/infraestrutura.md`](docs/arquitetura/diagramas/infraestrutura.md).
+> Desenho da infraestrutura: [`docs/arquitetura/diagramas/infraestrutura.md`](docs/arquitetura/diagramas/infraestrutura.md).
 
----
+## Vídeo demonstrativo
 
-## CI/CD
-
-Dois workflows do GitHub Actions:
-
-| Workflow | Gatilho | O que faz |
-|---|---|---|
-| [`ci.yml`](.github/workflows/ci.yml) | Pull Request → `main` | build + testes (validação de PR) |
-| [`ci-cd.yml`](.github/workflows/ci-cd.yml) | Push/merge → `main`, `workflow_dispatch` | build → teste → imagem (**Amazon ECR**) → deploy no cluster **EKS** (`oficina-mecanica`) → smoke test em `/healthz/ready` via **API Gateway** |
-
-Credenciais: `aws-actions/configure-aws-credentials`, com as **três credenciais de sessão
-temporárias** da conta AWS Academy (`AWS_SESSION_TOKEN` incluído — ver
-[ADR-006](docs/arquitetura/adrs/006-credenciais-de-nuvem-no-cicd.md)). `workflow_dispatch` permite
-reexecutar o deploy depois de renovar as credenciais, sem precisar de um commit novo. O
-`Secret` do Kubernetes (`oficina-secrets`) é criado pela própria pipeline a partir dos segredos do
-Secrets Manager — nenhum valor sensível é impresso no log (`::add-mask::` em cada um).
-
-> Desenho do pipeline: [`diagramas/fluxo-deploy.md`](docs/arquitetura/diagramas/fluxo-deploy.md).
-
----
-
-## Autenticação e autorização
-
-Praticamente todos os endpoints exigem JWT, e a autorização passou a considerar o **papel** do
-token — ver [RFC-001](docs/arquitetura/rfcs/001-estrategia-de-autenticacao.md) e
-[ADR-003](docs/arquitetura/adrs/003-dois-emissores-e-autorizacao-por-papel.md).
-
-### Os dois papéis
-
-| Papel | Quem é | Emissor do token | Credencial |
-|---|---|---|---|
-| `Oficina` | Operador da oficina | **Esta aplicação** — `POST /api/v1/auth/login` | email + senha |
-| `Cliente` | Cliente da oficina | **Function Serverless** de autenticação (repositório separado) | CPF |
-
-**Token da oficina** — emitido pela própria aplicação:
-
-```bash
-curl -s -X POST http://localhost:8080/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email": "admin@oficina.com", "senha": "admin123"}'
-```
-
-**Token do cliente** — emitido pela Function Serverless em repositório próprio
-([`oficina-mecanica-lambda-auth`](https://github.com/gabrielMauad/oficina-mecanica-lambda-auth),
-ver [ADR-005](docs/arquitetura/adrs/005-quatro-repositorios-e-estrategia-de-branches.md)), na
-nuvem via `POST <url-da-api>/auth/cpf` — não existe rota nesta aplicação que emita token de
-cliente. Localmente (`docker compose`, sem a Lambda rodando), esse token só é obtido manualmente:
-assinando um JWT em HS256 com o mesmo `Jwt__Secret` da aplicação, com
-`iss=oficina-mecanica-auth`, `aud=oficina-mecanica-api`, `sub=<id do cliente>` e `role=Cliente`. É
-exatamente o que o helper `CreateClienteAuthenticatedClient(clienteId)` faz nos testes de
-integração
-([`OficinaMecanicaWebApplicationFactory`](tests/IntegrationTests/Infrastructure/OficinaMecanicaWebApplicationFactory.cs)).
-
-Ambos os tokens têm validade de **1 hora** e são enviados como `Authorization: Bearer <token>`
-(ou pelo botão **Authorize** no Scalar). O contrato de claims está no
-[RFC-001 §4.1](docs/arquitetura/rfcs/001-estrategia-de-autenticacao.md).
-
-### Mapa de rotas por papel
-
-| Rota | Papel exigido |
-|---|---|
-| `POST /api/v1/auth/login` | **Anônima** |
-| `GET /healthz`, `/healthz/live`, `/healthz/ready` | **Anônima** |
-| `GET /api/v1/ordens-servico/acompanhamento` | `Cliente` (lista só as OS do cliente do token) |
-| `PATCH /api/v1/ordens-servico/{id}/aprovar-orcamento` | `Cliente` |
-| `PATCH /api/v1/ordens-servico/{id}/rejeitar-orcamento` | `Cliente` |
-| `GET /api/v1/ordens-servico/{id}` e `/{id}/status` | `Cliente` **ou** `Oficina` |
-| `GET /api/v1/ordens-servico?clienteId=...` | `Oficina` |
-| Demais rotas de `ordens-servico` (abertura, diagnóstico, execução, finalização, conclusão) | `Oficina` |
-| Todas as rotas de `clientes`, `veiculos`, `servicos` e `pecas-insumos` | `Oficina` |
-
-Regra adicional: um token de papel `Cliente` só opera sobre ordens de serviço **do próprio
-cliente** — o `sub` do token é comparado com o dono da OS. Um cliente acessando a OS de outro
-recebe **403 Forbidden**, não 404.
-
-> **Mudança em relação à Fase 2:** `GET /api/v1/ordens-servico?clienteId=...` **deixou de ser
-> anônima** e passou a exigir papel `Oficina` — uma listagem completa de ordens de serviço é
-> informação sensível. O acompanhamento pelo cliente também deixou de ser público: agora é
-> `GET /api/v1/ordens-servico/acompanhamento`, autenticado e filtrado pelo token.
+> 🎥 **Fase 4:** <!-- video-fase-4 --> o link do vídeo será adicionado aqui. Roteiro: fluxo completo da
+> OS pelos serviços, Saga e tratamento de falhas (compensação por pagamento recusado), pipeline e
+> deploy de um serviço com validação dos testes, e monitoramento com rastreamento distribuído.
 >
-> A documentação OpenAPI/Scalar continua acessível **sem autenticação** — decisão consciente,
-> registrada no [RFC-001 §8](docs/arquitetura/rfcs/001-estrategia-de-autenticacao.md).
-
-> Credenciais e segredo JWT são definidos no `docker-compose.yml` (dev) e no `Secret`
-> `oficina-secrets` do Kubernetes (nuvem — criado pela pipeline a partir do secret
-> `oficina-mecanica/dev/app` do Secrets Manager, ver [Deploy na Nuvem (AWS)](#deploy-na-nuvem-aws)).
-> O emissor e a audience aceitos vêm de `Jwt__ValidIssuers__0` / `__1` e `Jwt__Audience`.
+> Fase 3 (arquitetura em nuvem): <https://youtu.be/ZnaUtgUUb5I>.
 
 ---
 
-## Health checks
+# Histórico
 
-| Endpoint | O que verifica | Uso |
-|---|---|---|
-| `GET /healthz/live` | **Liveness** — só se o processo responde; não toca em dependências | `livenessProbe` do Kubernetes |
-| `GET /healthz/ready` | **Readiness** — inclui o check do **PostgreSQL**; devolve `503` se o banco estiver indisponível | `readinessProbe` do Kubernetes |
-| `GET /healthz` | **Agregado** — todos os checks registrados | Smoke test da pipeline (`ci-cd.yml`) |
+## Fases 1 a 3 (resumo)
 
-Os três são **anônimos**. `/healthz/live` continua respondendo `200` mesmo com o banco fora do
-ar — é o que separa "o processo travou" (reiniciar) de "a dependência caiu" (tirar do
-balanceamento), comportamento coberto por teste de integração em
-[`tests/IntegrationTests/HealthChecks`](tests/IntegrationTests/HealthChecks).
+- **Fase 1** — back-end **monolítico** com DDD, APIs REST, autenticação JWT e testes.
+- **Fase 2** — refatoração para **Clean Code + Clean Architecture**, novas APIs de OS (abertura
+  completa, aprovação/recusa de orçamento, acompanhamento ordenado por status) e infraestrutura
+  (Docker, Kubernetes, Terraform, CI/CD, HPA). Planos em
+  [`docs/planos/refatoracao-clean-architecture/`](docs/planos/refatoracao-clean-architecture/) e
+  [`docs/planos/infra-fase-2/`](docs/planos/infra-fase-2/).
+- **Fase 3** — nuvem (AWS Academy): **EKS**, **RDS**, **API Gateway**, **Lambda** de autenticação por CPF,
+  observabilidade com OpenTelemetry + New Relic, RFCs e ADRs 001–008. Análise em
+  [`docs/planos/fase-3/`](docs/planos/fase-3/00-analise-da-spec.md).
 
----
+O sistema era um **Modular Monolith**: quatro Bounded Contexts com fronteiras físicas, um único
+PostgreSQL com um schema por módulo e um barramento de eventos em processo. Na Fase 4 cada módulo
+virou um serviço e o barramento em memória virou mensageria (ver [ADR-009](docs/arquitetura/adrs/009-decomposicao-em-microsservicos.md)
+e [ADR-010](docs/arquitetura/adrs/010-saga-coreografada-com-masstransit.md)).
 
-## Observabilidade (OpenTelemetry + New Relic)
+## Documentação completa
 
-Traces, métricas e logs via **OpenTelemetry .NET**, exportados por **OTLP** para o **New Relic**
-(decisão em [RFC-004](docs/arquitetura/rfcs/004-ferramenta-de-observabilidade.md); correlação
-log↔trace em [ADR-004](docs/arquitetura/adrs/004-correlacao-via-traceid-w3c.md)). Instrumentação
-isolada em
-[`src/Bootstrap/Api/Extensions/ObservabilityExtensions.cs`](src/Bootstrap/Api/Extensions/ObservabilityExtensions.cs)
-(traces + métricas) e
-[`src/Bootstrap/Api/Extensions/LoggingExtensions.cs`](src/Bootstrap/Api/Extensions/LoggingExtensions.cs)
-(logs — console JSON estruturado **e** OTLP, lado a lado).
-
-**O que é instrumentado:**
-- **ASP.NET Core** — requisições de entrada (latência das APIs).
-- **HttpClient** — chamadas HTTP de saída.
-- **Npgsql** — comandos SQL executados via EF Core/Npgsql, aparecem como spans filhos do span da
-  requisição (tempo gasto em banco).
-- **Runtime** (`OpenTelemetry.Instrumentation.Runtime`) — CPU, memória e GC do processo, para
-  correlacionar com o consumo visto pelo `kubectl top pods` / HPA.
-- Os **meters de negócio** da aplicação (`OficinaMecanica.OrdensServico`,
-  `OficinaMecanica.Integracoes`, ver [`docs/arquitetura/metricas.md`](docs/arquitetura/metricas.md))
-  já estão registrados no provedor de métricas.
-- **Logs**, via o provedor de logging do OpenTelemetry (`builder.Logging.AddOpenTelemetry(...)`) —
-  cada linha carrega `trace_id`/`span_id` nativamente, o que o New Relic usa para vincular log e
-  trace na interface sem configuração adicional.
-
-**Amostragem em 100%** (`AlwaysOnSampler`), decisão da ADR-004: nenhum trace usado como evidência
-para o vídeo de entrega pode ser descartado. Isso é deliberado para o volume deste projeto — **não
-seria adequado em produção real**, onde amostragem parcial é necessária.
-
-**Temporalidade delta nas métricas** — configurada em código (`TemporalityPreference.Delta` no
-metric reader do exportador OTLP), porque é a temporalidade que o backend do New Relic espera;
-deixar no padrão cumulativo do SDK produziria somas erradas em contadores como "volume diário de
-OS".
-
-**Destino configurável por variável de ambiente, sem SDK/agente proprietário no código:**
-
-| Variável | Efeito |
-|---|---|
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | Endpoint OTLP de destino — coletor local (Jaeger), New Relic, etc. |
-| `OTEL_EXPORTER_OTLP_PROTOCOL` | Protocolo do exportador (`http/protobuf` em produção, na porta 4318 — ver [ConfigMap](k8s/base/01-configmap.yaml)) |
-| `OTEL_EXPORTER_OTLP_HEADERS` | Headers extras — em produção, `api-key=<license key>` do New Relic, no formato `chave1=valor1,chave2=valor2` |
-
-Em Kubernetes essas variáveis apontam para `https://otlp.nr-data.net:4318` (New Relic, data center
-US) — endpoint no `ConfigMap` (não é segredo), `api-key` no `Secret` `oficina-secrets` (é segredo,
-nunca em texto plano). Localmente continuam apontando para o Jaeger do compose (abaixo).
-
-No ambiente **`Testing`** (usado pelo `WebApplicationFactory` dos testes de integração) **nada**
-disso é registrado — nem traces/métricas, nem logs por OTLP — sem coletor disponível, a suíte
-tentaria exportar para um destino inexistente, seria mais lenta e mais ruidosa.
-
-### Kubernetes: CPU e memória do cluster (`nri-bundle`)
-
-O OTLP da aplicação cobre o processo da API, não o cluster inteiro. CPU/memória por nó e por pod
-vêm do **Kubernetes integration da New Relic**, instalado via Helm (chart `nri-bundle`) pela
-própria pipeline, no namespace `newrelic`, antes de aplicar os manifestos da aplicação — ver o job
-"Deploy no EKS" em
-[`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml) e os values versionados em
-[`k8s/observabilidade/newrelic-values.yaml`](k8s/observabilidade/newrelic-values.yaml) (que também
-documenta, em comentário, por que cada componente não essencial do bundle está desligado — os nós
-são `t3.small` e a HPA precisa de espaço para escalar até 5 réplicas).
-
-### Verificação local (sem ferramenta paga)
-
-O `docker compose up` sobe também um **Jaeger all-in-one** com OTLP habilitado, já apontado pela
-API (`OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317` no `docker-compose.yml`):
-
-```bash
-docker compose up --build
-
-# faça algumas requisições autenticadas contra a API (ex.: via Bruno/curl) e depois:
-# abra a UI do Jaeger
-```
-
-- **Jaeger UI:** `http://localhost:16686` — selecione o serviço `oficina-mecanica-api`, clique em
-  **Find Traces** e abra um trace: o span da requisição HTTP aparece com o(s) span(s) do banco
-  (Npgsql) aninhados dentro dele, com a duração de cada um.
-- Os logs (`docker compose logs api`) continuam em JSON com `trace_id`/`span_id`
-  (`TraceJsonConsoleFormatter`, ADR-004) — o mesmo `trace_id` visto no log aparece na busca por
-  Trace ID do Jaeger, fechando a correlação log → trace.
-- O provedor de logging OTLP também fica ativo localmente (o compose roda em `Development`, não em
-  `Testing`) e tenta exportar logs para o mesmo endpoint do Jaeger. O Jaeger **não** implementa o
-  serviço OTLP de logs — essas tentativas falham silenciosamente no self-diagnostics do próprio
-  OpenTelemetry (mesmo comportamento que métricas já têm hoje contra o Jaeger, que também não é
-  consumidor de métricas), nunca no `ILogger`/console da aplicação. `docker compose logs api`
-  continua limpo, só com as linhas JSON do `TraceJsonConsoleFormatter`.
-
-### Depois do deploy — configuração na interface do New Relic
-
-Dashboard, alertas e monitor sintético não são provisionáveis pela pipeline (contas de terceiro,
-sem Terraform) — o roteiro de configuração manual está em
-[`docs/observabilidade/`](docs/observabilidade/):
-[`dashboard-oficina-mecanica.json`](docs/observabilidade/dashboard-oficina-mecanica.json)
-(importável), [`alertas.md`](docs/observabilidade/alertas.md) e
-[`uptime.md`](docs/observabilidade/uptime.md). As consultas NRQL foram validadas com dados reais
-de produção — ver [`validacao.md`](docs/observabilidade/validacao.md).
-
----
-
-## APIs — Documentação e Collection
-
-| Recurso | Onde |
-|---|---|
-| **Documentação interativa (Scalar/OpenAPI)** | `docker compose up`: `http://localhost:8080/scalar` (e `/openapi`) — nuvem: `<url-da-api>/scalar`, onde `<url-da-api>` é descoberta com o comando em [Deploy na Nuvem (AWS)](#deploy-na-nuvem-aws) |
-| **Collection completa (Bruno)** | [`docs/guias/collection_bruno.yml`](docs/guias/collection_bruno.yml) — importável no [Bruno](https://usebruno.com), ambiente `Local` pré-configurado |
-
-A collection Bruno inclui todos os módulos e endpoints. Ela usa **duas variáveis de token** no
-ambiente `Local`: `token_oficina` (herdado por todas as requisições) e `token_cliente`, que
-sobrescreve o header apenas em **Aprovar Orçamento**, **Rejeitar Orçamento** e **Listar para
-Acompanhamento** — as três rotas de papel `Cliente`. Preencha `token_oficina` com o campo `token`
-da resposta de **Autenticacao > Login**; `token_cliente` precisa ser gerado manualmente enquanto a
-Function Serverless de autenticação por CPF não existir (ver seção
-[Autenticação e autorização](#autenticação-e-autorização)).
-
-A exposição do Scalar/OpenAPI **não depende mais do ambiente** (`ASPNETCORE_ENVIRONMENT`) — é
-controlada pela flag `OpenApi:Enabled` (variável `OpenApi__Enabled`), habilitada por padrão em
-[`appsettings.json`](src/Bootstrap/Api/appsettings.json) e propagada explicitamente no
-[`docker-compose.yml`](docker-compose.yml) e no [`ConfigMap`](k8s/base/01-configmap.yaml) do
-Kubernetes. Isso permite consultar a documentação também no ambiente publicado (kind), e desligá-la
-sem recompilar (`OpenApi__Enabled=false`) caso um deploy mais restritivo precise disso. Os testes
-de integração desligam a flag explicitamente para manter a suíte rápida e sem rotas de
-documentação registradas.
-
----
-
-## Testes
-
-### Guias E2E
-
-- **[Cenário feliz (happy path)](docs/guias/teste-cenario-feliz.md)** — fluxo completo com
-  exemplos `curl`, resultados esperados e checklist.
-- **[Cenários alternativos](docs/guias/teste-cenarios-alternativos.md)** — validações de erro:
-  CPF/CNPJ inválido, placa inválida, transições inválidas, estoque insuficiente, rejeição + estorno.
-
-### Testes automatizados
-
-```bash
-# Todos (unitários + integração)
-dotnet test OficinaMecanica.slnx
-
-# Apenas unitários (sem Docker)
-dotnet test OficinaMecanica.slnx --filter "Category!=Integration"
-
-# Apenas integração (requer Docker — Testcontainers.PostgreSql)
-dotnet test tests/IntegrationTests
-```
-
-| Camada | Ferramenta |
-|---|---|
-| Framework | xUnit |
-| Mocks | Moq |
-| Integração (banco real) | Testcontainers.PostgreSql |
-| Cobertura | Coverlet + ReportGenerator |
-
-**Domain.Tests** — puros, sem IO, sustentam a cobertura ≥ 80%. **IntegrationTests** — sobem a
-aplicação completa com `WebApplicationFactory<Program>` e Postgres real, validando migrations,
-adapters e o pipeline de eventos de ponta a ponta.
-
-### Cobertura (meta ≥ 80%)
-
-```bash
-dotnet test OficinaMecanica.slnx --collect:"XPlat Code Coverage" --results-directory coverage-results/
-reportgenerator -reports:"coverage-results/**/coverage.cobertura.xml" -targetdir:"coverage-report/" -reporttypes:Html
-```
-
-![Coverage Summary](docs/images/coverage-summary.png)
-![Coverage Detail](docs/images/coverage-detail.png)
-
----
-
-## Vídeo Demonstrativo
-
-> 🎥 **[Assista à demonstração no YouTube](https://youtu.be/ZnaUtgUUb5I)** _(https://youtu.be/ZnaUtgUUb5I)_
-
-O vídeo (≤ 15 min, público ou não listado) demonstra:
-
-- Deploy da aplicação (Terraform provisiona o cluster e sobe a stack)
-- Execução do CI/CD (pipeline no GitHub Actions)
-- Consumo das APIs (via Scalar / Bruno)
-- **Escalabilidade automática** — carga na API dispara o HPA e escala as réplicas
-
----
-
-## Documentação Completa
-
-Índice navegável de toda a documentação: **[`docs/README.md`](docs/README.md)**.
+Índice navegável: **[`docs/README.md`](docs/README.md)**.
 
 | Tema | Pasta |
 |---|---|
-| Arquitetura, diagramas e decisões | [`docs/arquitetura/`](docs/arquitetura/) |
-| Planos de implementação e infra | [`docs/planos/`](docs/planos/) |
-| Guias de teste e collection | [`docs/guias/`](docs/guias/) |
-| Terraform do cluster/rede/ECR (passo a passo) | [`oficina-mecanica-infra-k8s`](https://github.com/gabrielMauad/oficina-mecanica-infra-k8s) |
-| Terraform do banco gerenciado (passo a passo) | [`oficina-mecanica-infra-db`](https://github.com/gabrielMauad/oficina-mecanica-infra-db) |
-| Terraform e pipeline da Function Serverless | [`oficina-mecanica-lambda-auth`](https://github.com/gabrielMauad/oficina-mecanica-lambda-auth) |
+| Arquitetura, diagramas, RFCs e ADRs | [`docs/arquitetura/`](docs/arquitetura/) |
+| Saga e compensações | [`docs/arquitetura/diagramas/saga.md`](docs/arquitetura/diagramas/saga.md) |
+| Coleções (Bruno e Postman) e guias de teste | [`docs/guias/`](docs/guias/) |
+| Dashboard, alertas e uptime (New Relic) | [`docs/observabilidade/`](docs/observabilidade/) |
+| Planos de implementação | [`docs/planos/`](docs/planos/) |
 | Enunciados oficiais (FIAP) | [`docs/spec/`](docs/spec/) |
 
 ---

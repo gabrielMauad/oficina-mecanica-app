@@ -5,6 +5,10 @@
 - **Decisões derivadas:** [ADR-001](../adrs/001-jwt-hs256-segredo-compartilhado.md),
   [ADR-002](../adrs/002-lambda-le-o-banco-diretamente.md),
   [ADR-003](../adrs/003-dois-emissores-e-autorizacao-por-papel.md)
+- **Atualização da Fase 4:** os dois emissores continuam, mas o da oficina é o serviço `autenticacao` e a
+  Function deixou de ler o banco — consulta o Cadastro por HTTP
+  ([ADR-011](../adrs/011-lambda-consulta-o-cadastro-por-http.md), que substitui a ADR-002). As seções
+  abaixo que falam em leitura direta de `cadastro.cliente` descrevem o desenho da Fase 3.
 
 ---
 

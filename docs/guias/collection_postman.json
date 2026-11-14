@@ -1,0 +1,1932 @@
+{
+  "info": {
+    "name": "Oficina Mecanica",
+    "description": "Coleção da Fase 4 (cinco serviços). Importe também um ambiente (Local ou Nuvem): cada serviço tem a própria variável de URL (url_autenticacao, url_cadastro, url_pecas_insumos, url_ordens_servico, url_pagamento, url_lambda). Preencha token_oficina com o token de Autenticação > Login e token_cliente com o da Lambda (nuvem) ou um JWT manual (local).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token_oficina}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "clienteId",
+      "value": "01fb6838-c929-4095-8da6-eece5d1876c6",
+      "type": "string"
+    },
+    {
+      "key": "veiculoId",
+      "value": "65d1ac22-2b99-4e69-96a2-828270dac950",
+      "type": "string"
+    },
+    {
+      "key": "servicoId",
+      "value": "3967b433-5e3e-409e-b5a4-43d6e723c067",
+      "type": "string"
+    },
+    {
+      "key": "pecasInsumoId",
+      "value": "272ec4ba-81f9-4398-99d2-9bd29e0d9c50",
+      "type": "string"
+    },
+    {
+      "key": "ordemServicoId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "documento",
+      "value": "07287471000171",
+      "type": "string"
+    },
+    {
+      "key": "cpf",
+      "value": "52998224725",
+      "type": "string"
+    },
+    {
+      "key": "mp_access_token",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Autenticação",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{url_autenticacao}}/api/v1/auth/login",
+              "host": [
+                "{{url_autenticacao}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@oficina.com\",\n  \"senha\": \"admin123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Copie o campo token da resposta para token_oficina (variável do ambiente)."
+          },
+          "response": []
+        },
+        {
+          "name": "Autenticar cliente por CPF (Lambda — somente nuvem)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{url_lambda}}/auth/cpf",
+              "host": [
+                "{{url_lambda}}"
+              ],
+              "path": [
+                "auth",
+                "cpf"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cpf\": \"{{cpf}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Só existe na nuvem (API Gateway). Copie o campo token da resposta para token_cliente. Localmente, gere o JWT do cliente manualmente (ver README)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Cadastro",
+      "item": [
+        {
+          "name": "Clientes",
+          "item": [
+            {
+              "name": "Criar",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{url_cadastro}}/api/v1/clientes",
+                  "host": [
+                    "{{url_cadastro}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "clientes"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"nome\": \"Teste CNPJ\",\n  \"documento\": \"07.287.471/0001-71\",\n  \"email\": \"testecpnj@email.com\",\n  \"telefone\": \"31999999998\",\n  \"pessoaFisica\": false\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Guarde o clienteId retornado na variável clienteId."
+              },
+              "response": []
+            },
+            {
+              "name": "Listar",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{url_cadastro}}/api/v1/clientes",
+                  "host": [
+                    "{{url_cadastro}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "clientes"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Obter por ID",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{url_cadastro}}/api/v1/clientes/{{clienteId}}",
+                  "host": [
+                    "{{url_cadastro}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "clientes",
+                    "{{clienteId}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Obter por documento",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{url_cadastro}}/api/v1/clientes/documento/{{documento}}",
+                  "host": [
+                    "{{url_cadastro}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "clientes",
+                    "documento",
+                    "{{documento}}"
+                  ]
+                },
+                "description": "Rota usada pela Lambda de autenticação por CPF. O documento vai só com dígitos. 404 se não existir."
+              },
+              "response": []
+            },
+            {
+              "name": "Atualizar nome",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{url_cadastro}}/api/v1/clientes/{{clienteId}}/nome",
+                  "host": [
+                    "{{url_cadastro}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "clientes",
+                    "{{clienteId}}",
+                    "nome"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"nome\": \"Teste CNPJJ\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Atualizar telefone",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{url_cadastro}}/api/v1/clientes/{{clienteId}}/telefone",
+                  "host": [
+                    "{{url_cadastro}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "clientes",
+                    "{{clienteId}}",
+                    "telefone"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"telefone\": \"(31) 99999-9999\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Desativar",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{url_cadastro}}/api/v1/clientes/{{clienteId}}",
+                  "host": [
+                    "{{url_cadastro}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "clientes",
+                    "{{clienteId}}"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Veículos",
+          "item": [
+            {
+              "name": "Criar",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{url_cadastro}}/api/v1/veiculos",
+                  "host": [
+                    "{{url_cadastro}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "veiculos"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"placa\": \"HIJ1K25\",\n  \"modelo\": \"Onix\",\n  \"marca\": \"Chevrolet\",\n  \"ano\": 2027,\n  \"clienteId\": \"{{clienteId}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Guarde o veiculoId retornado na variável veiculoId."
+              },
+              "response": []
+            },
+            {
+              "name": "Listar",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{url_cadastro}}/api/v1/veiculos",
+                  "host": [
+                    "{{url_cadastro}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "veiculos"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Obter por ID",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{url_cadastro}}/api/v1/veiculos/{{veiculoId}}",
+                  "host": [
+                    "{{url_cadastro}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "veiculos",
+                    "{{veiculoId}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Obter por cliente",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{url_cadastro}}/api/v1/clientes/{{clienteId}}/veiculos",
+                  "host": [
+                    "{{url_cadastro}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "clientes",
+                    "{{clienteId}}",
+                    "veiculos"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Serviços",
+          "item": [
+            {
+              "name": "Criar",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{url_cadastro}}/api/v1/servicos",
+                  "host": [
+                    "{{url_cadastro}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "servicos"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"nome\": \"Troca de óleo\",\n  \"descricao\": \"Alinhamento de pneus\",\n  \"preco\": 120.99\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Guarde o servicoId retornado na variável servicoId."
+              },
+              "response": []
+            },
+            {
+              "name": "Listar",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{url_cadastro}}/api/v1/servicos",
+                  "host": [
+                    "{{url_cadastro}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "servicos"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Obter por ID",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{url_cadastro}}/api/v1/servicos/{{servicoId}}",
+                  "host": [
+                    "{{url_cadastro}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "servicos",
+                    "{{servicoId}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Atualizar descricao",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{url_cadastro}}/api/v1/servicos/{{servicoId}}/descricao",
+                  "host": [
+                    "{{url_cadastro}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "servicos",
+                    "{{servicoId}}",
+                    "descricao"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"descricao\": \"Alinhamento\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Atualizar preco",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{url_cadastro}}/api/v1/servicos/{{servicoId}}/preco",
+                  "host": [
+                    "{{url_cadastro}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "servicos",
+                    "{{servicoId}}",
+                    "preco"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"preco\": 150\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Desativar",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{url_cadastro}}/api/v1/servicos/{{servicoId}}",
+                  "host": [
+                    "{{url_cadastro}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "servicos",
+                    "{{servicoId}}"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Peças e Insumos",
+      "item": [
+        {
+          "name": "Criar",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{url_pecas_insumos}}/api/v1/pecas-insumos",
+              "host": [
+                "{{url_pecas_insumos}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pecas-insumos"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nome\": \"Pneu\",\n  \"preco\": 200,\n  \"quantidadeEmEstoque\": 0,\n  \"unidadeDeMedida\": \"Unidade\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Guarde o pecaInsumoId retornado na variável pecasInsumoId."
+          },
+          "response": []
+        },
+        {
+          "name": "Listar",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{url_pecas_insumos}}/api/v1/pecas-insumos",
+              "host": [
+                "{{url_pecas_insumos}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pecas-insumos"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Obter por ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{url_pecas_insumos}}/api/v1/pecas-insumos/{{pecasInsumoId}}",
+              "host": [
+                "{{url_pecas_insumos}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pecas-insumos",
+                "{{pecasInsumoId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Verificar disponibilidade",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{url_pecas_insumos}}/api/v1/pecas-insumos/{{pecasInsumoId}}/disponibilidade?quantidade=2",
+              "host": [
+                "{{url_pecas_insumos}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pecas-insumos",
+                "{{pecasInsumoId}}",
+                "disponibilidade"
+              ],
+              "query": [
+                {
+                  "key": "quantidade",
+                  "value": "2"
+                }
+              ]
+            },
+            "description": "Usada pela OS na abertura completa. 200 {disponivel, precoUnitario}; 404 se a peça não existir; 422 se quantidade <= 0."
+          },
+          "response": []
+        },
+        {
+          "name": "Atualizar descricao",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{url_pecas_insumos}}/api/v1/pecas-insumos/{{pecasInsumoId}}/descricao",
+              "host": [
+                "{{url_pecas_insumos}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pecas-insumos",
+                "{{pecasInsumoId}}",
+                "descricao"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"descricao\": \"Pneu aro 18\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Atualizar preco",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{url_pecas_insumos}}/api/v1/pecas-insumos/{{pecasInsumoId}}/preco",
+              "host": [
+                "{{url_pecas_insumos}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pecas-insumos",
+                "{{pecasInsumoId}}",
+                "preco"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"preco\": 150\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Incrementar estoque",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{url_pecas_insumos}}/api/v1/pecas-insumos/{{pecasInsumoId}}/estoque/entrada",
+              "host": [
+                "{{url_pecas_insumos}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pecas-insumos",
+                "{{pecasInsumoId}}",
+                "estoque",
+                "entrada"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantidade\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Decrementar estoque",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{url_pecas_insumos}}/api/v1/pecas-insumos/{{pecasInsumoId}}/estoque/saida",
+              "host": [
+                "{{url_pecas_insumos}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pecas-insumos",
+                "{{pecasInsumoId}}",
+                "estoque",
+                "saida"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantidade\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Desativar",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{url_pecas_insumos}}/api/v1/pecas-insumos/{{pecasInsumoId}}",
+              "host": [
+                "{{url_pecas_insumos}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pecas-insumos",
+                "{{pecasInsumoId}}"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Ordens de Serviço",
+      "item": [
+        {
+          "name": "Gerar",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{url_ordens_servico}}/api/v1/ordens-servico",
+              "host": [
+                "{{url_ordens_servico}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ordens-servico"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clienteId\": \"{{clienteId}}\",\n  \"veiculoId\": \"{{veiculoId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Abre a OS em Recebida. Guarde o id retornado em ordemServicoId."
+          },
+          "response": []
+        },
+        {
+          "name": "Abrir Completa",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{url_ordens_servico}}/api/v1/ordens-servico/completa",
+              "host": [
+                "{{url_ordens_servico}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ordens-servico",
+                "completa"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clienteId\": \"{{clienteId}}\",\n  \"veiculoId\": \"{{veiculoId}}\",\n  \"servicos\": [\n    {\n      \"servicoId\": \"{{servicoId}}\",\n      \"quantidade\": 1\n    }\n  ],\n  \"pecas\": [\n    {\n      \"pecaInsumoId\": \"{{pecasInsumoId}}\",\n      \"quantidade\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Abre a OS já em AguardandoAprovacao e publica OrcamentoGerado (o PecasInsumos baixa as peças). Guarde o id em ordemServicoId."
+          },
+          "response": []
+        },
+        {
+          "name": "Listar por Cliente",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{url_ordens_servico}}/api/v1/ordens-servico?clienteId={{clienteId}}",
+              "host": [
+                "{{url_ordens_servico}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ordens-servico"
+              ],
+              "query": [
+                {
+                  "key": "clienteId",
+                  "value": "{{clienteId}}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Obter por ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{url_ordens_servico}}/api/v1/ordens-servico/{{ordemServicoId}}",
+              "host": [
+                "{{url_ordens_servico}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ordens-servico",
+                "{{ordemServicoId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Obter Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{url_ordens_servico}}/api/v1/ordens-servico/{{ordemServicoId}}/status",
+              "host": [
+                "{{url_ordens_servico}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ordens-servico",
+                "{{ordemServicoId}}",
+                "status"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Listar para Acompanhamento",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{url_ordens_servico}}/api/v1/ordens-servico/acompanhamento",
+              "host": [
+                "{{url_ordens_servico}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ordens-servico",
+                "acompanhamento"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_cliente}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Iniciar Diagnóstico",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{url_ordens_servico}}/api/v1/ordens-servico/{{ordemServicoId}}/iniciar-diagnostico",
+              "host": [
+                "{{url_ordens_servico}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ordens-servico",
+                "{{ordemServicoId}}",
+                "iniciar-diagnostico"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Registrar Diagnóstico",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{url_ordens_servico}}/api/v1/ordens-servico/{{ordemServicoId}}/registrar-diagnostico",
+              "host": [
+                "{{url_ordens_servico}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ordens-servico",
+                "{{ordemServicoId}}",
+                "registrar-diagnostico"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"descricaoDiagnostico\": \"Diagnóstico completo do veículo\",\n  \"servicos\": [\n    {\n      \"servicoId\": \"{{servicoId}}\",\n      \"quantidade\": 1\n    }\n  ],\n  \"pecas\": [\n    {\n      \"pecaInsumoId\": \"{{pecasInsumoId}}\",\n      \"quantidade\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Aprovar Orçamento",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{url_ordens_servico}}/api/v1/ordens-servico/{{ordemServicoId}}/aprovar-orcamento",
+              "host": [
+                "{{url_ordens_servico}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ordens-servico",
+                "{{ordemServicoId}}",
+                "aprovar-orcamento"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_cliente}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Publica OrcamentoAprovado: o serviço Pagamento cria o pagamento Pendente. A OS continua em AguardandoAprovacao até o pagamento ser aprovado."
+          },
+          "response": []
+        },
+        {
+          "name": "Rejeitar Orçamento",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{url_ordens_servico}}/api/v1/ordens-servico/{{ordemServicoId}}/rejeitar-orcamento",
+              "host": [
+                "{{url_ordens_servico}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ordens-servico",
+                "{{ordemServicoId}}",
+                "rejeitar-orcamento"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_cliente}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Publica OrcamentoRejeitado: o PecasInsumos estorna as peças."
+          },
+          "response": []
+        },
+        {
+          "name": "Finalizar",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{url_ordens_servico}}/api/v1/ordens-servico/{{ordemServicoId}}/finalizar",
+              "host": [
+                "{{url_ordens_servico}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ordens-servico",
+                "{{ordemServicoId}}",
+                "finalizar"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Concluir",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{url_ordens_servico}}/api/v1/ordens-servico/{{ordemServicoId}}/concluir",
+              "host": [
+                "{{url_ordens_servico}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ordens-servico",
+                "{{ordemServicoId}}",
+                "concluir"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Pagamento",
+      "item": [
+        {
+          "name": "Listar pagamentos da OS",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{url_pagamento}}/api/v1/pagamentos/ordens-servico/{{ordemServicoId}}",
+              "host": [
+                "{{url_pagamento}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pagamentos",
+                "ordens-servico",
+                "{{ordemServicoId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_cliente}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Cliente (só o dono) ou Oficina. Lista {pagamentoId, ordemServicoId, orcamentoId, valor, status, motivoRecusa, criadoEm, atualizadoEm}."
+          },
+          "response": []
+        },
+        {
+          "name": "Pagar — APRO (aprovado)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{url_pagamento}}/api/v1/pagamentos/ordens-servico/{{ordemServicoId}}/pagar",
+              "host": [
+                "{{url_pagamento}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pagamentos",
+                "ordens-servico",
+                "{{ordemServicoId}}",
+                "pagar"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_cliente}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"titularCartao\": \"APRO\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Titular APRO: o mock do Mercado Pago aprova; publica PagamentoAprovado e a OS passa a EmExecucao. 404 sem pagamento Pendente; 403 se não for o dono."
+          },
+          "response": []
+        },
+        {
+          "name": "Pagar — OTHE (recusado)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{url_pagamento}}/api/v1/pagamentos/ordens-servico/{{ordemServicoId}}/pagar",
+              "host": [
+                "{{url_pagamento}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pagamentos",
+                "ordens-servico",
+                "{{ordemServicoId}}",
+                "pagar"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_cliente}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"titularCartao\": \"OTHE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Qualquer titular diferente de APRO é recusado (cc_rejected_other_reason): publica PagamentoRecusado, a OS rejeita o orçamento e o PecasInsumos estorna as peças."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Mock Mercado Pago (somente local)",
+      "description": "Endpoints do mock hospedado no serviço de Pagamento. O próprio serviço os chama por HTTP ao processar /pagar; aqui servem para exercitar o mock isoladamente. Na nuvem não têm rota própria no API Gateway.",
+      "item": [
+        {
+          "name": "Obter access_token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{url_pagamento}}/mock/mercadopago/oauth/token",
+              "host": [
+                "{{url_pagamento}}"
+              ],
+              "path": [
+                "mock",
+                "mercadopago",
+                "oauth",
+                "token"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client_id\": \"mp-dev-client\",\n  \"client_secret\": \"mp-dev-secret\",\n  \"grant_type\": \"client_credentials\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Credenciais de desenvolvimento local. Copie access_token para mp_access_token. 401 se as credenciais não forem as configuradas."
+          },
+          "response": []
+        },
+        {
+          "name": "Criar pagamento",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{url_pagamento}}/mock/mercadopago/v1/payments",
+              "host": [
+                "{{url_pagamento}}"
+              ],
+              "path": [
+                "mock",
+                "mercadopago",
+                "v1",
+                "payments"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{mp_access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transaction_amount\": 241.8,\n  \"external_reference\": \"orcamento-exemplo\",\n  \"description\": \"Pagamento de teste\",\n  \"card_holder_name\": \"APRO\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Bearer = access_token do mock. card_holder_name APRO -> approved/accredited; outro valor -> rejected/cc_rejected_other_reason."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Fluxo da Saga",
+      "description": "Roteiro do fluxo completo na ordem: cadastros, OS, aprovação, pagamento, execução e entrega — e a variante de compensação (pagamento recusado). Os ids retornados são copiados à mão para as variáveis da coleção. A baixa e o estorno de estoque e a criação do pagamento são assíncronos: aguarde alguns segundos entre os passos.",
+      "item": [
+        {
+          "name": "1. Login (oficina) -> token_oficina",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{url_autenticacao}}/api/v1/auth/login",
+              "host": [
+                "{{url_autenticacao}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@oficina.com\",\n  \"senha\": \"admin123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Copie o campo token da resposta para token_oficina (variável do ambiente)."
+          },
+          "response": []
+        },
+        {
+          "name": "2. Criar cliente -> clienteId",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{url_cadastro}}/api/v1/clientes",
+              "host": [
+                "{{url_cadastro}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "clientes"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nome\": \"Teste CNPJ\",\n  \"documento\": \"07.287.471/0001-71\",\n  \"email\": \"testecpnj@email.com\",\n  \"telefone\": \"31999999998\",\n  \"pessoaFisica\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Guarde o clienteId retornado na variável clienteId."
+          },
+          "response": []
+        },
+        {
+          "name": "3. Criar veículo -> veiculoId",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{url_cadastro}}/api/v1/veiculos",
+              "host": [
+                "{{url_cadastro}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "veiculos"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"placa\": \"HIJ1K25\",\n  \"modelo\": \"Onix\",\n  \"marca\": \"Chevrolet\",\n  \"ano\": 2027,\n  \"clienteId\": \"{{clienteId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Guarde o veiculoId retornado na variável veiculoId."
+          },
+          "response": []
+        },
+        {
+          "name": "4. Criar serviço -> servicoId",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{url_cadastro}}/api/v1/servicos",
+              "host": [
+                "{{url_cadastro}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "servicos"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nome\": \"Troca de óleo\",\n  \"descricao\": \"Alinhamento de pneus\",\n  \"preco\": 120.99\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Guarde o servicoId retornado na variável servicoId."
+          },
+          "response": []
+        },
+        {
+          "name": "5. Criar peça -> pecasInsumoId",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{url_pecas_insumos}}/api/v1/pecas-insumos",
+              "host": [
+                "{{url_pecas_insumos}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pecas-insumos"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nome\": \"Pneu\",\n  \"preco\": 200,\n  \"quantidadeEmEstoque\": 0,\n  \"unidadeDeMedida\": \"Unidade\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Guarde o pecaInsumoId retornado na variável pecasInsumoId."
+          },
+          "response": []
+        },
+        {
+          "name": "6. Incrementar estoque (+10)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{url_pecas_insumos}}/api/v1/pecas-insumos/{{pecasInsumoId}}/estoque/entrada",
+              "host": [
+                "{{url_pecas_insumos}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pecas-insumos",
+                "{{pecasInsumoId}}",
+                "estoque",
+                "entrada"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantidade\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "7. Abrir OS completa (2 peças) -> ordemServicoId",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{url_ordens_servico}}/api/v1/ordens-servico/completa",
+              "host": [
+                "{{url_ordens_servico}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ordens-servico",
+                "completa"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clienteId\": \"{{clienteId}}\",\n  \"veiculoId\": \"{{veiculoId}}\",\n  \"servicos\": [\n    {\n      \"servicoId\": \"{{servicoId}}\",\n      \"quantidade\": 1\n    }\n  ],\n  \"pecas\": [\n    {\n      \"pecaInsumoId\": \"{{pecasInsumoId}}\",\n      \"quantidade\": 2\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Publica OrcamentoGerado. Guarde o id em ordemServicoId."
+          },
+          "response": []
+        },
+        {
+          "name": "8. Conferir estoque (baixou 2)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{url_pecas_insumos}}/api/v1/pecas-insumos/{{pecasInsumoId}}",
+              "host": [
+                "{{url_pecas_insumos}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pecas-insumos",
+                "{{pecasInsumoId}}"
+              ]
+            },
+            "description": "Aguarde alguns segundos: a baixa é assíncrona."
+          },
+          "response": []
+        },
+        {
+          "name": "9. Aprovar orçamento (cliente)",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{url_ordens_servico}}/api/v1/ordens-servico/{{ordemServicoId}}/aprovar-orcamento",
+              "host": [
+                "{{url_ordens_servico}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ordens-servico",
+                "{{ordemServicoId}}",
+                "aprovar-orcamento"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_cliente}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "10. Listar pagamentos (Pendente)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{url_pagamento}}/api/v1/pagamentos/ordens-servico/{{ordemServicoId}}",
+              "host": [
+                "{{url_pagamento}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pagamentos",
+                "ordens-servico",
+                "{{ordemServicoId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_cliente}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Aguarde alguns segundos: o pagamento Pendente é criado pelo evento OrcamentoAprovado."
+          },
+          "response": []
+        },
+        {
+          "name": "11a. Pagar — APRO (caminho feliz)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{url_pagamento}}/api/v1/pagamentos/ordens-servico/{{ordemServicoId}}/pagar",
+              "host": [
+                "{{url_pagamento}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pagamentos",
+                "ordens-servico",
+                "{{ordemServicoId}}",
+                "pagar"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_cliente}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"titularCartao\": \"APRO\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "11b. Pagar — OTHE (compensação; use no lugar da 11a)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{url_pagamento}}/api/v1/pagamentos/ordens-servico/{{ordemServicoId}}/pagar",
+              "host": [
+                "{{url_pagamento}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pagamentos",
+                "ordens-servico",
+                "{{ordemServicoId}}",
+                "pagar"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_cliente}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"titularCartao\": \"OTHE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "12. Conferir a OS (EmExecucao com APRO; orçamento Rejeitado com OTHE)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{url_ordens_servico}}/api/v1/ordens-servico/{{ordemServicoId}}",
+              "host": [
+                "{{url_ordens_servico}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ordens-servico",
+                "{{ordemServicoId}}"
+              ]
+            },
+            "description": "Aguarde alguns segundos pelo evento de pagamento."
+          },
+          "response": []
+        },
+        {
+          "name": "13. Conferir estoque (com OTHE, estornou as 2 peças)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{url_pecas_insumos}}/api/v1/pecas-insumos/{{pecasInsumoId}}",
+              "host": [
+                "{{url_pecas_insumos}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pecas-insumos",
+                "{{pecasInsumoId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "14. Finalizar (só no caminho feliz)",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{url_ordens_servico}}/api/v1/ordens-servico/{{ordemServicoId}}/finalizar",
+              "host": [
+                "{{url_ordens_servico}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ordens-servico",
+                "{{ordemServicoId}}",
+                "finalizar"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "15. Concluir -> Entregue (só no caminho feliz)",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{url_ordens_servico}}/api/v1/ordens-servico/{{ordemServicoId}}/concluir",
+              "host": [
+                "{{url_ordens_servico}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ordens-servico",
+                "{{ordemServicoId}}",
+                "concluir"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

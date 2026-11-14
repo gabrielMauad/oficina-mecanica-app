@@ -3,6 +3,11 @@
 > Decisões de design que explicam _por que_ o código é como é. Complementa
 > [`estrutura-do-projeto.md`](estrutura-do-projeto.md) (o "o quê" da estrutura) e
 > [`clean-architecture.md`](clean-architecture.md) (aderência à Clean Architecture).
+>
+> **Fase 4:** o monólito virou o serviço **OrdensServico** e os outros módulos viraram serviços próprios
+> ([ADR-009](adrs/009-decomposicao-em-microsservicos.md)). As decisões de domínio e de estrutura abaixo
+> continuam valendo dentro de cada serviço; o que mudou é o mecanismo de comunicação (seção
+> "Comunicação entre serviços") e o fluxo da OS, que ganhou o pagamento (seção "Ciclo de Vida de uma OS").
 
 ---
 
@@ -10,12 +15,13 @@
 
 Um domain event existe apenas se houver um handler concreto que consuma e faça algo
 significativo. Eventos sem consumidor são _dead code_. Dos ~15 candidatos identificados no
-event storming, **3 sobreviveram**:
+event storming, **3 sobreviveram** (na Fase 4 somou-se um quarto, `OrcamentoAprovado`):
 
 | Evento | Onde | Consumidores |
 |---|---|---|
-| `OrcamentoGerado` | OrdemServico.Domain | (1) `PublicarOrcamentoGerado` enfileira `OrcamentoGeradoIntegrationEvent` → decrementa estoque; (2) `EnviarOrcamentoAoCliente` chama `EnviarOrcamento()` no agregado |
-| `OrcamentoRejeitado` | OrdemServico.Domain | `PublicarOrcamentoRejeitado` enfileira `OrcamentoRejeitadoIntegrationEvent` → estorna estoque |
+| `OrcamentoGerado` | OrdemServico.Domain | (1) `PublicarOrcamentoGerado` enfileira `OrcamentoGeradoIntegrationEvent` → o PecasInsumos baixa o estoque; (2) `EnviarOrcamentoAoCliente` chama `EnviarOrcamento()` no agregado |
+| `OrcamentoAprovado` _(Fase 4)_ | OrdemServico.Domain | `PublicarOrcamentoAprovado` enfileira `OrcamentoAprovadoIntegrationEvent` → o Pagamento cria o pagamento `Pendente` |
+| `OrcamentoRejeitado` | OrdemServico.Domain | `PublicarOrcamentoRejeitado` enfileira `OrcamentoRejeitadoIntegrationEvent` → o PecasInsumos estorna o estoque |
 | `OrdemServicoFinalizada` | OrdemServico.Domain | `NotificarClienteAoFinalizar` chama `NotificarCliente()` no agregado (stub de log) |
 
 > **Nota da Fase 2:** o evento antes chamado `DiagnosticoConcluido` foi renomeado para
@@ -66,16 +72,18 @@ imutáveis (documento, email, nome do serviço) nunca são expostos para atualiz
 
 O estoque é reservado quando o orçamento é gerado (ao concluir o diagnóstico, ou já na abertura
 completa), não na aprovação. Isso evita a condição de corrida onde dois orçamentos disputam o
-mesmo estoque. A rejeição estorna via `OrcamentoRejeitadoIntegrationEvent`.
+mesmo estoque. Desde a Fase 4 a baixa é **atômica** (todas as peças do orçamento numa só transação, no
+PecasInsumos) e **assíncrona**; se não for possível, o PecasInsumos publica `EstoqueBaixaFalhou` e a OS
+rejeita o orçamento. A rejeição por qualquer outro motivo estorna via `OrcamentoRejeitadoIntegrationEvent`.
 
 ## Dois emissores de token e autorização por papel
 
-A aplicação **valida** tokens de dois emissores, mas só **emite** um deles:
+Cada serviço **valida** tokens de dois emissores; quem **emite** o da oficina é o serviço `autenticacao`:
 
 | Papel | Emissor | Credencial | `iss` |
 |---|---|---|---|
-| `Oficina` | esta aplicação (`POST /api/v1/auth/login`) | email + senha | `oficina-mecanica-app` |
-| `Cliente` | Function Serverless (repositório separado, ainda não existe) | CPF | `oficina-mecanica-auth` |
+| `Oficina` | serviço `autenticacao` (`POST /api/v1/auth/login`) | email + senha | `oficina-mecanica-app` |
+| `Cliente` | Function Serverless (`oficina-mecanica-lambda-auth`, `POST /auth/cpf`) | CPF | `oficina-mecanica-auth` |
 
 Ambos são HS256 com o mesmo segredo compartilhado e carregam a claim `role`. As rotas deixaram
 de exigir apenas "estar autenticado": cada ação declara o papel exigido. Além do papel, um token
@@ -87,7 +95,7 @@ Consequência prática: `GET /api/v1/ordens-servico?clienteId=...` **deixou de s
 `GET /api/v1/ordens-servico/acompanhamento`, filtrado pelo token. Racional completo em
 [`rfcs/001-estrategia-de-autenticacao.md`](rfcs/001-estrategia-de-autenticacao.md) e
 [`adrs/003-dois-emissores-e-autorizacao-por-papel.md`](adrs/003-dois-emissores-e-autorizacao-por-papel.md);
-mapa de rotas por papel no [README](../../README.md#mapa-de-rotas-por-papel).
+mapa de rotas por papel no [README](../../README.md#api-papéis-e-eventos).
 
 ## Result\<T\> — erros de negócio sem exceptions
 
@@ -106,8 +114,8 @@ A OS tem **dois pontos de entrada** (adição da Fase 2, retrocompatível):
 ```
 POST /api/v1/ordens-servico             → status: Recebida
 PATCH /{id}/iniciar-diagnostico         → status: EmDiagnostico
-PATCH /{id}/registrar-diagnostico       → cria orçamento, envia ao cliente, decrementa estoque
-                                          (automático via domain events)
+PATCH /{id}/registrar-diagnostico       → cria orçamento, envia ao cliente, publica OrcamentoGerado
+                                          (o PecasInsumos baixa o estoque; automático via domain events)
                                           → status: AguardandoAprovacao, orçamento: Enviado
 ```
 
@@ -115,7 +123,7 @@ PATCH /{id}/registrar-diagnostico       → cria orçamento, envia ao cliente, d
 Recebida/Diagnóstico e o orçamento nasce direto.
 
 ```
-POST /api/v1/ordens-servico/completa    → cria orçamento, envia ao cliente, decrementa estoque
+POST /api/v1/ordens-servico/completa    → cria orçamento, envia ao cliente, publica OrcamentoGerado
                                           → status: AguardandoAprovacao, orçamento: Enviado
 ```
 
@@ -129,8 +137,11 @@ PATCH /{id}/finalizar                   → status: Finalizada, notificado_em pr
 PATCH /{id}/concluir                    → status: Entregue
 ```
 
-Consulta pública para o cliente acompanhar: `GET /api/v1/ordens-servico/acompanhamento`
+Consulta do cliente (autenticada, papel `Cliente`, só as OS dele): `GET /api/v1/ordens-servico/acompanhamento`
 (lista as OS em andamento) e `GET /api/v1/ordens-servico/{id}/status`.
+
+A OS **não tem status de pagamento**: o ciclo `Pendente → Aprovado | Recusado | Cancelado` é interno ao
+serviço Pagamento. Eventos e compensações em [`diagramas/saga.md`](diagramas/saga.md).
 
 ### Listagem de acompanhamento — ordenação e exclusão lógica (Fase 2)
 
