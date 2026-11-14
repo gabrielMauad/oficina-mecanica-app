@@ -1,6 +1,6 @@
 # ADR-007 — Padrão de comunicação entre módulos
 
-- **Status:** Aceita
+- **Status:** Substituída por [ADR-010](010-saga-coreografada-com-masstransit.md) (mecanismo assíncrono; o padrão de _ports_ e _adapters_ para chamadas síncronas continua valendo)
 - **Data:** 2026-09-15
 
 ## Contexto

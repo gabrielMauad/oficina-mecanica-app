@@ -1,5 +1,11 @@
 # Database Schema — Oficina Mecânica
 
+> **Fase 4:** os três schemas deste documento (`cadastro`, `pecas_insumos`, `ordem_servico`) continuam os
+> mesmos, mas cada um vive agora no **PostgreSQL do próprio serviço** — uma instância RDS por serviço, sem
+> acesso entre eles. O serviço de Pagamento usa uma tabela **DynamoDB** (chave de partição `OrdemServicoId`,
+> chave de ordenação `OrcamentoId`) e o de Autenticação não tem banco. O "banco único" mencionado abaixo
+> refere-se ao desenho original do monólito.
+
 > Schema revisado e validado contra o event storming e os requisitos do Tech Challenge.
 > Fonte de verdade para as migrations EF Core de cada módulo.
 

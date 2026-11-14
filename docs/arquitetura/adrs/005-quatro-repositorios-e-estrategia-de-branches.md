@@ -1,6 +1,6 @@
 # ADR-005 — Quatro repositórios e estratégia de branches
 
-- **Status:** Aceita
+- **Status:** Aceita (a aplicação foi dividida em cinco serviços na Fase 4 — ver [ADR-009](009-decomposicao-em-microsservicos.md); os repositórios de infraestrutura e da Lambda e a estratégia de branches continuam valendo)
 - **Data:** 2026-09-07
 
 ## Contexto

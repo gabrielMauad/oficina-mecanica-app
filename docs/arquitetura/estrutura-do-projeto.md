@@ -1,5 +1,13 @@
 # Estrutura do Projeto — Oficina Mecânica (MVP DDD)
 
+> **Fase 4:** este documento registra a estrutura do **monólito modular** das fases 1–3. Na Fase 4 cada
+> módulo virou um microsserviço, em repositório próprio, com a mesma estrutura interna de camadas
+> descrita aqui, o `InMemoryIntegrationEventBus` deu lugar à mensageria (MassTransit sobre SNS/SQS) e as
+> consultas entre módulos viraram chamadas HTTP — ver
+> [ADR-009](adrs/009-decomposicao-em-microsservicos.md), [ADR-010](adrs/010-saga-coreografada-com-masstransit.md) e
+> [`diagramas/componentes.md`](diagramas/componentes.md). O que está abaixo sobre Domain, Application,
+> Adapters e testes continua valendo dentro de cada serviço.
+
 > Documento de decisões de arquitetura e estrutura de projeto, consolidado durante sessão de brainstorming.
 > Serve como referência viva para o desenvolvimento incremental do MVP.
 

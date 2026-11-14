@@ -1,81 +1,163 @@
 {
   "name": "Oficina Mecânica — Observabilidade (RFC-004)",
-  "description": "ANTES DE IMPORTAR: substitua o valor 0 em todo campo \"accountId\" pelo Account ID da conta New Relic (visível em https://one.newrelic.com em Account settings, ou no menu do usuário). Todas as consultas abaixo foram validadas com tráfego real de produção - ver docs/observabilidade/validacao.md para o procedimento e os resultados esperado x medido, incluindo a seção \"Ajustes de visualização\" com os três problemas de gráfico corrigidos depois da importação de teste. O widget de uptime passa a ter dado assim que o monitor sintético `oficina-mecanica-healthz` (docs/observabilidade/uptime.md) for criado. Formato: schema de importação de dashboard da New Relic (mesma forma usada por NerdGraph DashboardInput / export de dashboard), ver https://docs.newrelic.com/docs/query-your-data/explore-query-data/dashboards/dashboards-charts-import-export-data/.",
+  "description": "ANTES DE IMPORTAR: substitua o valor 0 em todo campo \"accountId\" pelo Account ID da conta New Relic (visível em https://one.newrelic.com em Account settings, ou no menu do usuário). Três páginas: \"Visão por serviço\" (cinco serviços, service.name = oficina-mecanica-<serviço>), \"Ordens de serviço\" (métricas de negócio) e \"Saga e mensageria\" (eventos publicados/consumidos pelos spans do MassTransit e falhas de integração). As consultas de latência, erro, métricas de OS e Kubernetes foram validadas com tráfego real na Fase 3 (docs/observabilidade/validacao.md); as consultas por serviço e da Saga são da Fase 4 e usam atributos confirmados no código e no Jaeger local — a conferência com dados da nuvem está descrita na seção \"Fase 4\" de validacao.md. O widget de uptime passa a ter dado assim que os monitores sintéticos oficina-mecanica-healthz-<serviço> (docs/observabilidade/uptime.md) forem criados. Formato: schema de importação de dashboard da New Relic (mesma forma usada por NerdGraph DashboardInput / export de dashboard), ver https://docs.newrelic.com/docs/query-your-data/explore-query-data/dashboards/dashboards-charts-import-export-data/.",
   "permissions": "PUBLIC_READ_WRITE",
   "pages": [
     {
-      "name": "Oficina Mecânica",
+      "name": "Visão por serviço",
+      "description": "Tráfego, latência e erros dos cinco serviços (service.name = oficina-mecanica-<serviço>), mais CPU, memória e réplicas por serviço e o uptime dos health checks.",
       "widgets": [
         {
-          "title": "Volume diário de OS, por tipo",
-          "description": "Barras empilhadas (simples + completa) por dia. O período do dashboard precisa ser de pelo menos alguns dias (ex.: \"Since 7 days ago\") para os baldes diários (TIMESERIES 1 day) aparecerem — um período menor que 1 dia faz o New Relic cair em baldes automáticos de poucos minutos.",
-          "layout": { "column": 1, "row": 1, "width": 6, "height": 3 },
-          "visualization": { "id": "viz.stacked-bar" },
+          "title": "Requisições por serviço (exclui /healthz)",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
           "rawConfiguration": {
             "nrqlQueries": [
               {
                 "accountId": 0,
-                "query": "SELECT sum(`oficina.ordens_servico.abertas`) FROM Metric FACET tipo TIMESERIES 1 day SINCE 7 days ago"
+                "query": "SELECT count(*) FROM Span WHERE service.name LIKE 'oficina-mecanica-%' AND span.kind = 'server' AND url.path NOT LIKE '/healthz%' FACET service.name TIMESERIES AUTO SINCE 1 day ago"
               }
             ]
           }
         },
         {
-          "title": "Tempo médio por etapa (diagnóstico, execução, finalização), em segundos",
-          "layout": { "column": 7, "row": 1, "width": 6, "height": 3 },
-          "visualization": { "id": "viz.bar" },
+          "title": "Latência p95 por serviço, em ms (exclui /healthz)",
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
           "rawConfiguration": {
             "nrqlQueries": [
               {
                 "accountId": 0,
-                "query": "SELECT average(`oficina.ordens_servico.etapa.duracao`) FROM Metric FACET etapa SINCE 7 days ago"
+                "query": "SELECT percentile(duration.ms, 95) FROM Span WHERE service.name LIKE 'oficina-mecanica-%' AND span.kind = 'server' AND url.path NOT LIKE '/healthz%' FACET service.name TIMESERIES AUTO SINCE 1 day ago"
               }
             ]
           }
         },
         {
-          "title": "Erros e falhas nas integrações",
-          "layout": { "column": 1, "row": 4, "width": 6, "height": 3 },
-          "visualization": { "id": "viz.line" },
+          "title": "Taxa de erro HTTP (5xx) por serviço (exclui /healthz)",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
           "rawConfiguration": {
             "nrqlQueries": [
               {
                 "accountId": 0,
-                "query": "SELECT sum(`oficina.integracoes.falhas`) FROM Metric FACET evento, handler TIMESERIES 1 hour SINCE 7 days ago"
+                "query": "SELECT percentage(count(*), WHERE http.response.status_code >= 500) FROM Span WHERE service.name LIKE 'oficina-mecanica-%' AND span.kind = 'server' AND url.path NOT LIKE '/healthz%' FACET service.name TIMESERIES AUTO SINCE 1 day ago"
               }
             ]
           }
         },
         {
-          "title": "Latência das APIs — p95 e média (exclui /healthz, respondido pela NLB/kubelet a cada poucos segundos)",
-          "layout": { "column": 7, "row": 4, "width": 6, "height": 3 },
-          "visualization": { "id": "viz.line" },
+          "title": "Latência por serviço e rota — p95 e média, em ms (exclui /healthz)",
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
           "rawConfiguration": {
             "nrqlQueries": [
               {
                 "accountId": 0,
-                "query": "SELECT percentile(duration.ms, 95), average(duration.ms) FROM Span WHERE service.name = 'oficina-mecanica-api' AND span.kind = 'server' AND url.path NOT LIKE '/healthz%' FACET http.route TIMESERIES AUTO SINCE 1 day ago"
+                "query": "SELECT percentile(duration.ms, 95) AS 'p95', average(duration.ms) AS 'média', count(*) AS 'requisições' FROM Span WHERE service.name LIKE 'oficina-mecanica-%' AND span.kind = 'server' AND url.path NOT LIKE '/healthz%' FACET service.name, http.route SINCE 1 day ago LIMIT 40"
               }
             ]
           }
         },
         {
-          "title": "Taxa de erro HTTP (5xx) (exclui /healthz, respondido pela NLB/kubelet a cada poucos segundos)",
-          "layout": { "column": 1, "row": 7, "width": 6, "height": 3 },
-          "visualization": { "id": "viz.line" },
+          "title": "CPU por serviço (cores, média dos pods)",
+          "layout": {
+            "column": 1,
+            "row": 7,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
           "rawConfiguration": {
             "nrqlQueries": [
               {
                 "accountId": 0,
-                "query": "SELECT percentage(count(*), WHERE http.response.status_code >= 500) FROM Span WHERE service.name = 'oficina-mecanica-api' AND span.kind = 'server' AND url.path NOT LIKE '/healthz%' FACET http.route TIMESERIES AUTO SINCE 1 day ago"
+                "query": "SELECT average(cpuUsedCores) FROM K8sContainerSample WHERE clusterName = 'oficina-mecanica' AND namespaceName = 'oficina-mecanica' FACET deploymentName TIMESERIES AUTO SINCE 1 day ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Memória por serviço (working set, média dos pods)",
+          "layout": {
+            "column": 7,
+            "row": 7,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT average(memoryWorkingSetBytes) FROM K8sContainerSample WHERE clusterName = 'oficina-mecanica' AND namespaceName = 'oficina-mecanica' FACET deploymentName TIMESERIES AUTO SINCE 1 day ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Réplicas (pods) por serviço — efeito do HPA",
+          "layout": {
+            "column": 1,
+            "row": 10,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT uniqueCount(podName) FROM K8sContainerSample WHERE clusterName = 'oficina-mecanica' AND namespaceName = 'oficina-mecanica' FACET deploymentName TIMESERIES AUTO SINCE 1 day ago"
               }
             ]
           }
         },
         {
           "title": "CPU do cluster, por nó (cores)",
-          "layout": { "column": 1, "row": 10, "width": 6, "height": 3 },
-          "visualization": { "id": "viz.line" },
+          "layout": {
+            "column": 7,
+            "row": 10,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
           "rawConfiguration": {
             "nrqlQueries": [
               {
@@ -87,8 +169,15 @@
         },
         {
           "title": "Memória do cluster, por nó",
-          "layout": { "column": 7, "row": 10, "width": 6, "height": 3 },
-          "visualization": { "id": "viz.line" },
+          "layout": {
+            "column": 1,
+            "row": 13,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
           "rawConfiguration": {
             "nrqlQueries": [
               {
@@ -99,40 +188,258 @@
           }
         },
         {
-          "title": "CPU do cluster, por pod (cores)",
-          "layout": { "column": 1, "row": 13, "width": 6, "height": 3 },
-          "visualization": { "id": "viz.line" },
+          "title": "Uptime / healthcheck, por monitor",
+          "layout": {
+            "column": 7,
+            "row": 13,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          },
           "rawConfiguration": {
             "nrqlQueries": [
               {
                 "accountId": 0,
-                "query": "SELECT average(cpuUsedCores) FROM K8sContainerSample WHERE clusterName = 'oficina-mecanica' AND namespaceName = 'oficina-mecanica' FACET podName TIMESERIES AUTO SINCE 1 day ago"
+                "query": "SELECT percentage(count(*), WHERE result = 'SUCCESS') AS 'Uptime %' FROM SyntheticCheck WHERE monitorName LIKE 'oficina-mecanica-healthz%' FACET monitorName SINCE 1 day ago"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Ordens de serviço",
+      "description": "Métricas de negócio emitidas pelo serviço ordens-servico.",
+      "widgets": [
+        {
+          "title": "Volume diário de OS, por tipo",
+          "description": "Barras empilhadas (simples + completa) por dia. O período do dashboard precisa ser de pelo menos alguns dias (ex.: \"Since 7 days ago\") para os baldes diários (TIMESERIES 1 day) aparecerem — um período menor que 1 dia faz o New Relic cair em baldes automáticos de poucos minutos.",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.stacked-bar"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT sum(`oficina.ordens_servico.abertas`) FROM Metric FACET tipo TIMESERIES 1 day SINCE 7 days ago"
               }
             ]
           }
         },
         {
-          "title": "Memória do cluster, por pod",
-          "layout": { "column": 7, "row": 13, "width": 6, "height": 3 },
-          "visualization": { "id": "viz.line" },
+          "title": "Tempo médio por etapa (diagnóstico, execução, finalização), em segundos",
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.bar"
+          },
           "rawConfiguration": {
             "nrqlQueries": [
               {
                 "accountId": 0,
-                "query": "SELECT average(memoryWorkingSetBytes) FROM K8sContainerSample WHERE clusterName = 'oficina-mecanica' AND namespaceName = 'oficina-mecanica' FACET podName TIMESERIES AUTO SINCE 1 day ago"
+                "query": "SELECT average(`oficina.ordens_servico.etapa.duracao`) FROM Metric FACET etapa SINCE 7 days ago"
               }
             ]
           }
         },
         {
-          "title": "Uptime / healthcheck",
-          "layout": { "column": 1, "row": 16, "width": 6, "height": 3 },
-          "visualization": { "id": "viz.billboard" },
+          "title": "Latência das rotas de ordens de serviço — p95 e média, em ms (exclui /healthz)",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
           "rawConfiguration": {
             "nrqlQueries": [
               {
                 "accountId": 0,
-                "query": "SELECT percentage(count(*), WHERE result = 'SUCCESS') AS 'Uptime %' FROM SyntheticCheck WHERE monitorName = 'oficina-mecanica-healthz' SINCE 1 day ago"
+                "query": "SELECT percentile(duration.ms, 95), average(duration.ms) FROM Span WHERE service.name = 'oficina-mecanica-ordens-servico' AND span.kind = 'server' AND url.path NOT LIKE '/healthz%' FACET http.route TIMESERIES AUTO SINCE 1 day ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Taxa de erro HTTP (5xx) das rotas de ordens de serviço (exclui /healthz)",
+          "layout": {
+            "column": 7,
+            "row": 4,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT percentage(count(*), WHERE http.response.status_code >= 500) FROM Span WHERE service.name = 'oficina-mecanica-ordens-servico' AND span.kind = 'server' AND url.path NOT LIKE '/healthz%' FACET http.route TIMESERIES AUTO SINCE 1 day ago"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Saga e mensageria",
+      "description": "Fluxo da Saga entre ordens-servico, pecas-insumos e pagamento. Como os serviços não emitem contadores de eventos publicados/consumidos, a contagem vem dos spans do MassTransit (`<Evento> send`, `<fila> receive`/`process`) e as falhas, do contador oficina.integracoes.falhas.",
+      "widgets": [
+        {
+          "title": "Eventos publicados, por serviço e evento",
+          "description": "Um span `<Evento> send` por publicação. O nome do span identifica o evento (OrcamentoGerado, OrcamentoAprovado, OrcamentoRejeitado, EstoqueBaixaFalhou, PagamentoAprovado, PagamentoRecusado).",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.stacked-bar"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT count(*) FROM Span WHERE service.name LIKE 'oficina-mecanica-%' AND name LIKE '% send' FACET service.name, name TIMESERIES AUTO SINCE 1 day ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Eventos consumidos, por serviço e fila",
+          "description": "Um span `<fila> process` por mensagem processada. As filas seguem `<serviço>-<evento>` (ex.: ordens-servico-pagamento-aprovado).",
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.stacked-bar"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT count(*) FROM Span WHERE service.name LIKE 'oficina-mecanica-%' AND name LIKE '% process' FACET service.name, name TIMESERIES AUTO SINCE 1 day ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Resultado dos pagamentos (eventos publicados)",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT filter(count(*), WHERE name LIKE '%PagamentoAprovado% send') AS 'Aprovados', filter(count(*), WHERE name LIKE '%PagamentoRecusado% send') AS 'Recusados' FROM Span WHERE service.name = 'oficina-mecanica-pagamento' SINCE 1 day ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Compensações disparadas (eventos publicados)",
+          "description": "Pagamento recusado e falha na baixa de estoque são as causas; OrcamentoRejeitado também é publicado quando o cliente rejeita o orçamento (compensação 2).",
+          "layout": {
+            "column": 5,
+            "row": 4,
+            "width": 8,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT filter(count(*), WHERE name LIKE '%PagamentoRecusado% send') AS 'Pagamento recusado', filter(count(*), WHERE name LIKE '%OrcamentoRejeitado% send') AS 'Orçamento rejeitado (estorno das peças)', filter(count(*), WHERE name LIKE '%EstoqueBaixaFalhou% send') AS 'Falha na baixa de estoque' FROM Span WHERE service.name LIKE 'oficina-mecanica-%' SINCE 1 day ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Duração do processamento por consumidor — p95 e média, em ms",
+          "layout": {
+            "column": 1,
+            "row": 7,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT percentile(duration.ms, 95) AS 'p95', average(duration.ms) AS 'média', count(*) AS 'mensagens' FROM Span WHERE service.name LIKE 'oficina-mecanica-%' AND name LIKE '% process' FACET service.name, name SINCE 1 day ago LIMIT 20"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Falhas no processamento de eventos, por serviço, evento e handler",
+          "description": "Soma de oficina.integracoes.falhas. Uma falha técnica de consumo é contada a cada tentativa (até 4 por mensagem: a original e 3 reentregas); falhas lógicas (OS não encontrada, PagamentoAprovado de orçamento que não está Aprovado) contam uma vez.",
+          "layout": {
+            "column": 7,
+            "row": 7,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT sum(`oficina.integracoes.falhas`) FROM Metric FACET service.name, evento, handler TIMESERIES 1 hour SINCE 7 days ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Mensagens publicadas × processadas, por serviço",
+          "layout": {
+            "column": 1,
+            "row": 10,
+            "width": 12,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "SELECT filter(count(*), WHERE name LIKE '% send') AS 'publicadas', filter(count(*), WHERE name LIKE '% process') AS 'processadas' FROM Span WHERE service.name LIKE 'oficina-mecanica-%' FACET service.name SINCE 1 day ago"
               }
             ]
           }

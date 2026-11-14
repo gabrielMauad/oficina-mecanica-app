@@ -6,6 +6,11 @@ produção, dos nomes de evento/atributo usados em
 [`alertas.md`](alertas.md). É a evidência que sustenta a remoção dos `TODO: confirmar no primeiro
 dado` que existiam nesses dois arquivos antes desta validação.
 
+> **Escopo desta validação (Fase 3).** Os resultados abaixo foram medidos quando o único serviço se
+> chamava `oficina-mecanica-api`. Na Fase 4 são cinco serviços, cada um com o próprio `service.name`;
+> os atributos de `Span`, `Metric` e `K8sContainerSample` são os mesmos, e o que muda está descrito na
+> seção [Fase 4](#fase-4--visão-por-serviço-e-saga) no fim deste documento.
+
 ## Janela de tráfego gerado
 
 **2026-09-15, 17:24:55Z – 17:32:34Z** — 88 chamadas feitas pela API Gateway, todas com resposta no
@@ -84,11 +89,11 @@ diagnóstico manual.
 
 ## Correlação log ↔ trace
 
-Confirmada: logs de `service.name = 'oficina-mecanica-api'` chegam com `trace.id`, e o mesmo
+Confirmada na Fase 3 (com o nome antigo do serviço; hoje use `oficina-mecanica-ordens-servico` ou o serviço desejado): logs de `service.name = 'oficina-mecanica-api'` chegam com `trace.id`, e o mesmo
 `trace.id` localiza os spans da mesma requisição em `Span`. Procedimento reproduzível:
 
 ```sql
-SELECT trace.id, message FROM Log WHERE service.name = 'oficina-mecanica-api' AND trace.id IS NOT NULL SINCE 2 hours ago LIMIT 5
+SELECT trace.id, message FROM Log WHERE service.name LIKE 'oficina-mecanica-%' AND trace.id IS NOT NULL SINCE 2 hours ago LIMIT 5
 ```
 
 ```sql
@@ -174,3 +179,47 @@ mantido pela própria New Relic (que mapeia cada tipo de widget para o id usado 
 | Exclusão de health check | (ausente) | `AND url.path NOT LIKE '/healthz%'` |
 | Métricas de container Kubernetes | `K8sPodSample` | `K8sContainerSample` |
 | Filtro de rotas de OS em alertas | `name LIKE '%ordens-servico%'` | `http.route LIKE '%ordens-servico%'` |
+
+## Fase 4 — visão por serviço e Saga
+
+O dashboard e os alertas foram reescritos para o sistema distribuído. Esta seção separa o que está
+**confirmado** do que **ainda será conferido com dados da nuvem**.
+
+### Confirmado (código e execução local)
+
+| Item | Fonte da confirmação |
+|---|---|
+| `service.name` de cada serviço: `oficina-mecanica-ordens-servico`, `-autenticacao`, `-cadastro`, `-pecas-insumos`, `-pagamento` | `OTEL_SERVICE_NAME` nos ConfigMaps/`docker-compose.yml` e o padrão em `ObservabilityExtensions` de cada serviço |
+| Métricas emitidas: `oficina.ordens_servico.abertas`, `oficina.ordens_servico.etapa.duracao` (só OS) e `oficina.integracoes.falhas` (OS, PecasInsumos e Pagamento) — **não há** contador de eventos publicados/consumidos | meters do código (`OrdensServicoMetrics`, `IntegracoesMetrics`); ver [`metricas.md`](../arquitetura/metricas.md) |
+| Spans da mensageria: o MassTransit gera `<Evento> send` ao publicar e `<fila> receive` / `<fila> process` ao consumir, com o `traceparent` propagado (fonte `MassTransit` registrada no tracer) | árvore de spans vista no Jaeger local do fluxo completo (publicação e consumo da OS, PecasInsumos e Pagamento no mesmo trace) |
+| Nomes das filas: `ordens-servico-pagamento-aprovado`, `ordens-servico-pagamento-recusado`, `ordens-servico-estoque-baixa-falhou`, `pecas-insumos-orcamento-gerado`, `pecas-insumos-orcamento-rejeitado`, `pagamento-orcamento-aprovado`, `pagamento-estoque-baixa-falhou` | formatter `<serviço>-<evento>` e filas observadas no ambiente local |
+| `deploymentName` em `K8sContainerSample` (usado nos widgets por serviço) | `keyset()` da seção "Atributos confirmados" acima |
+
+### A conferir com tráfego real na nuvem
+
+Os widgets abaixo usam atributos e nomes confirmados no código e no Jaeger, mas ainda **não foram
+executados contra a conta do New Relic** com dados dos cinco serviços. Ao gerar tráfego na nuvem
+(abertura → aprovação → pagamento `APRO` e `OTHE`), confira:
+
+1. `SELECT uniques(service.name) FROM Span SINCE 1 hour ago` — aparecem os cinco nomes.
+2. `SELECT uniques(name) FROM Span WHERE name LIKE '% send' OR name LIKE '% process' SINCE 1 hour ago`
+   — aparecem os spans de publicação e consumo dos seis eventos (se o nome dos spans de `send` vier
+   diferente, ajuste os `LIKE` dos widgets da página "Saga e mensageria" e da seção abaixo).
+3. `SELECT keyset() FROM Metric WHERE metricName = 'oficina.integracoes.falhas' SINCE 1 day ago` —
+   confirma as dimensões `evento`, `handler` e `service.name`; o contador só existe depois da
+   primeira falha de integração.
+4. A página "Visão por serviço": requisições, latência e 5xx por `service.name`; réplicas por
+   `deploymentName`.
+
+O resultado da conferência (esperado × medido) será registrado aqui, como na seção da Fase 3.
+
+### Como ler a visão da Saga
+
+- **Publicados × processados** (`% send` × `% process`): num fluxo saudável, todo evento publicado é
+  processado pelos consumidores correspondentes; `EstoqueBaixaFalhou` tem **dois** consumidores
+  (OS e Pagamento) e `OrcamentoRejeitado`/`OrcamentoGerado` um (PecasInsumos), então as contagens por
+  evento não são 1:1.
+- **Compensações**: `PagamentoRecusado`, `OrcamentoRejeitado` e `EstoqueBaixaFalhou` publicados.
+  `OrcamentoRejeitado` também ocorre quando o cliente rejeita o orçamento, sem falha alguma.
+- **Falhas**: `oficina.integracoes.falhas` por `service.name`, `evento` e `handler`; uma falha técnica
+  de consumo conta a cada tentativa do retry (até 4 por mensagem).
