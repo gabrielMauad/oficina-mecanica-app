@@ -95,7 +95,7 @@ jobs:
             /d:sonar.token="$SONAR_TOKEN" \
             /d:sonar.host.url="https://sonarcloud.io" \
             /d:sonar.cs.opencover.reportsPaths="**/coverage.opencover.xml" \
-            /d:sonar.coverage.exclusions="**/Migrations/**,**/Program.cs"
+            /d:sonar.coverage.exclusions="**/Migrations/**,**/Program.cs,**/*.generated.cs"
 
       - name: Build
         run: dotnet build "${{ env.SOLUTION }}" --no-restore --configuration Release
@@ -105,13 +105,33 @@ jobs:
       - name: Test (com cobertura)
         run: |
           dotnet test "${{ env.SOLUTION }}" --no-build --configuration Release --verbosity normal \
-            --collect "XPlat Code Coverage;Format=opencover"
+            --settings coverage.runsettings --collect "XPlat Code Coverage"
 
       - name: SonarCloud - end
         if: steps.sonar.outputs.enabled == 'true'
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
+
+      # Gate de cobertura: nao depende do SonarCloud (roda e passa sem SONAR_TOKEN). Consolida os
+      # relatorios de todos os projetos de teste e falha se a cobertura de linhas do servico
+      # (todas as assemblies de src/, sem tests/) ficar abaixo de 80%. As exclusoes (migrations,
+      # Program.cs e codigo gerado) estao em coverage.runsettings e valem tambem para o Sonar.
+      - name: Instalar ReportGenerator
+        run: dotnet tool install --global dotnet-reportgenerator-globaltool --version 5.5.7
+
+      - name: Gate de cobertura (linhas >= 80%)
+        run: |
+          reportgenerator \
+            "-reports:**/coverage.opencover.xml" \
+            "-targetdir:coverage-report" \
+            "-reporttypes:JsonSummary;TextSummary" \
+            "-assemblyfilters:+*;-*Tests;-IntegrationTests;-OrdensServico.Bdd"
+          cat coverage-report/Summary.txt
+          cobertura=$(jq -r '.summary.linecoverage' coverage-report/Summary.json)
+          echo "Cobertura de linhas: ${cobertura}% (minimo: 80%)"
+          jq -e '.summary.linecoverage >= 80' coverage-report/Summary.json > /dev/null \
+            || { echo "::error::Cobertura de linhas ${cobertura}% abaixo do minimo de 80%."; exit 1; }
 
   # A conta e uma AWS Academy Learner Lab - nao permite IAM role/OIDC, entao autentica com as
   # tres credenciais de sessao temporarias, renovadas manualmente a cada sessao do laboratorio.
