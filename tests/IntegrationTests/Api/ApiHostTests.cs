@@ -55,6 +55,31 @@ public class ApiHostTests
         Assert.Equal("JWT", bearer.GetProperty("bearerFormat").GetString());
     }
 
+    [Fact(DisplayName = "OpenAPI habilitado → operações autorizadas exigem o esquema Bearer; a raiz não declara segurança")]
+    public async Task OpenApiHabilitado_OperacoesAutorizadasReferenciamBearer()
+    {
+        using var factory = ComOpenApi(true);
+        using var client = factory.CreateClient();
+
+        var json = await client.GetStringAsync("/openapi/v1.json", TestContext.Current.CancellationToken);
+
+        using var doc = JsonDocument.Parse(json);
+        var paths = doc.RootElement.GetProperty("paths");
+        var operacoes = paths.EnumerateObject()
+            .Where(p => p.Name.StartsWith("/api/v1/ordens-servico"))
+            .SelectMany(p => p.Value.EnumerateObject())
+            .Select(op => op.Value)
+            .ToList();
+        Assert.NotEmpty(operacoes);
+        Assert.All(operacoes, op =>
+        {
+            Assert.True(op.TryGetProperty("security", out var security) && security.GetArrayLength() > 0);
+            // O requisito deve referenciar o esquema Bearer; um objeto vazio ({}) não protege nada.
+            Assert.True(security[0].TryGetProperty("Bearer", out _));
+        });
+        Assert.False(paths.GetProperty("/").GetProperty("get").TryGetProperty("security", out _));
+    }
+
     [Fact(DisplayName = "OpenAPI habilitado → GET / redireciona para /scalar")]
     public async Task OpenApiHabilitado_RaizRedirecionaParaScalar()
     {
