@@ -1,6 +1,6 @@
 # ADR-002 — A Lambda de autenticação lê o banco diretamente
 
-- **Status:** Aceita
+- **Status:** Substituída por [ADR-011](011-lambda-consulta-o-cadastro-por-http.md)
 - **Data:** 2026-09-07
 - **Contexto maior:** [RFC-001 — Estratégia de autenticação](../rfcs/001-estrategia-de-autenticacao.md)
 

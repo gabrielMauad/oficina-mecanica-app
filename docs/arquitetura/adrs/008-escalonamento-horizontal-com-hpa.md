@@ -1,6 +1,6 @@
 # ADR-008 — Escalonamento horizontal com HPA
 
-- **Status:** Aceita
+- **Status:** Aceita (a decisão — HPA por CPU — continua; os números mudaram na Fase 4: cada um dos cinco serviços tem HPA de 1 a 3 réplicas a 50% de CPU e o node group passou a `t3.medium`, 2 a 4 nós — ver [`infraestrutura.md`](../diagramas/infraestrutura.md))
 - **Data:** 2026-09-15
 - **Contexto maior:** [RFC-002 — Escolha do provedor de nuvem](../rfcs/002-escolha-do-provedor-de-nuvem.md)
 

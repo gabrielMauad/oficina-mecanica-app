@@ -13,86 +13,128 @@ config:
         password: ''
       bypassProxy: ''
   environments:
+    # Local: um serviço por porta (docker compose de cada repositório + docker-compose.infra.yml).
     - name: Local
       variables:
-        - name: url
-          value: http://localhost:8080
-        # Token de papel Oficina — copie o campo "token" da resposta de Autenticacao > Login.
-        # É o token herdado por padrão em todas as requisições da collection.
+        - name: url_ordens_servico
+          value: 'http://localhost:8080'
+        - name: url_autenticacao
+          value: 'http://localhost:8081'
+        - name: url_cadastro
+          value: 'http://localhost:8082'
+        - name: url_pecas_insumos
+          value: 'http://localhost:8083'
+        - name: url_pagamento
+          value: 'http://localhost:8084'
+        # A Lambda de autenticação por CPF só existe na nuvem; local, gere o JWT do cliente manualmente (ver README).
+        - name: url_lambda
+          value: ''
+        # Token de papel Oficina — campo "token" da resposta de Autenticação > Login. Herdado por todas as requisições.
         - name: token_oficina
           value: ''
-        # Token de papel Cliente — usado apenas por "Aprovar Orçamento",
-        # "Rejeitar Orçamento" e "Listar para Acompanhamento".
-        # NÃO existe endpoint nesta aplicação que o emita: quem emite é a Function
-        # Serverless de autenticação por CPF, que ainda não foi construída.
-        # Até lá, gere manualmente um JWT HS256 com o mesmo Jwt__Secret da aplicação e as
-        # claims iss=oficina-mecanica-auth, aud=oficina-mecanica-api,
-        # sub=<id do cliente dono da OS>, role=Cliente. Ver RFC-001 §4.1.
+        # Token de papel Cliente — usado por Aprovar/Rejeitar Orçamento, Listar para Acompanhamento e pelas rotas de Pagamento.
+        # Na nuvem vem da Lambda (Autenticação > Autenticar cliente por CPF). Local: JWT HS256 assinado com o Jwt__Secret
+        # (iss=oficina-mecanica-auth, aud=oficina-mecanica-api, sub=<id do cliente dono da OS>, role=Cliente).
+        - name: token_cliente
+          value: ''
+    # Nuvem: todos os serviços atrás do mesmo endpoint do API Gateway.
+    # Descubra o endpoint com:
+    #   aws apigatewayv2 get-apis --query "Items[?Name=='oficina-mecanica-api'].ApiEndpoint | [0]" --output text
+    - name: Nuvem
+      variables:
+        - name: url_ordens_servico
+          value: 'https://<ID-DA-API>.execute-api.us-east-1.amazonaws.com'
+        - name: url_autenticacao
+          value: 'https://<ID-DA-API>.execute-api.us-east-1.amazonaws.com'
+        - name: url_cadastro
+          value: 'https://<ID-DA-API>.execute-api.us-east-1.amazonaws.com'
+        - name: url_pecas_insumos
+          value: 'https://<ID-DA-API>.execute-api.us-east-1.amazonaws.com'
+        - name: url_pagamento
+          value: 'https://<ID-DA-API>.execute-api.us-east-1.amazonaws.com'
+        - name: url_lambda
+          value: 'https://<ID-DA-API>.execute-api.us-east-1.amazonaws.com'
+        - name: token_oficina
+          value: ''
         - name: token_cliente
           value: ''
 items:
   - info:
-      name: Cadastro
+      name: 'Autenticação'
       type: folder
       seq: 1
     request:
       auth: inherit
     items:
+      # Copie o campo token da resposta para token_oficina (variável do ambiente).
       - info:
-          name: Clientes
+          name: 'Login'
+          type: http
+          seq: 1
+        http:
+          method: POST
+          url: '{{url_autenticacao}}/api/v1/auth/login'
+          headers:
+            - name: Content-Type
+              value: 'application/json'
+          body:
+            type: json
+            data: |-
+              {
+                "email": "admin@oficina.com",
+                "senha": "admin123"
+              }
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      # Só existe na nuvem (API Gateway). Copie o campo token da resposta para token_cliente. Localmente, gere o JWT do cliente manualmente (ver README).
+      - info:
+          name: 'Autenticar cliente por CPF (Lambda — somente nuvem)'
+          type: http
+          seq: 2
+        http:
+          method: POST
+          url: '{{url_lambda}}/auth/cpf'
+          headers:
+            - name: Content-Type
+              value: 'application/json'
+          body:
+            type: json
+            data: |-
+              {
+                "cpf": "{{cpf}}"
+              }
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+  - info:
+      name: 'Cadastro'
+      type: folder
+      seq: 2
+    request:
+      auth: inherit
+    items:
+      - info:
+          name: 'Clientes'
           type: folder
           seq: 1
         request:
           auth: inherit
-          variables:
-            - name: route_prefix
-              value: '{{api_prefix}}/clientes'
         items:
+          # Guarde o clienteId retornado na variável clienteId.
           - info:
-              name: Atualizar nome
-              type: http
-              seq: 4
-            http:
-              method: PATCH
-              url: '{{url}}/{{route_prefix}}/{{clienteId}}/nome'
-              body:
-                type: json
-                data: |-
-                  {
-                    "nome": "Teste CNPJJ"
-                  }
-              auth: inherit
-            settings:
-              encodeUrl: true
-              timeout: 0
-              followRedirects: true
-              maxRedirects: 5
-          - info:
-              name: Atualizar telefone
-              type: http
-              seq: 5
-            http:
-              method: PATCH
-              url: '{{url}}/{{route_prefix}}/{{clienteId}}/telefone'
-              body:
-                type: json
-                data: |-
-                  {
-                    "telefone": "(31) 99999-9999"
-                  }
-              auth: inherit
-            settings:
-              encodeUrl: true
-              timeout: 0
-              followRedirects: true
-              maxRedirects: 5
-          - info:
-              name: Criar
+              name: 'Criar'
               type: http
               seq: 1
             http:
               method: POST
-              url: '{{url}}/{{route_prefix}}'
+              url: '{{url_cadastro}}/api/v1/clientes'
               body:
                 type: json
                 data: |-
@@ -110,25 +152,12 @@ items:
               followRedirects: true
               maxRedirects: 5
           - info:
-              name: Desativar
-              type: http
-              seq: 6
-            http:
-              method: DELETE
-              url: '{{url}}/{{route_prefix}}/{{clienteId}}'
-              auth: inherit
-            settings:
-              encodeUrl: true
-              timeout: 0
-              followRedirects: true
-              maxRedirects: 5
-          - info:
-              name: Listar
+              name: 'Listar'
               type: http
               seq: 2
             http:
               method: GET
-              url: '{{url}}/{{route_prefix}}'
+              url: '{{url_cadastro}}/api/v1/clientes'
               auth: inherit
             settings:
               encodeUrl: true
@@ -136,12 +165,77 @@ items:
               followRedirects: true
               maxRedirects: 5
           - info:
-              name: Obter por ID
+              name: 'Obter por ID'
               type: http
               seq: 3
             http:
               method: GET
-              url: '{{url}}/{{route_prefix}}/{{clienteId}}'
+              url: '{{url_cadastro}}/api/v1/clientes/{{clienteId}}'
+              auth: inherit
+            settings:
+              encodeUrl: true
+              timeout: 0
+              followRedirects: true
+              maxRedirects: 5
+          # Rota usada pela Lambda de autenticação por CPF. O documento vai só com dígitos. 404 se não existir.
+          - info:
+              name: 'Obter por documento'
+              type: http
+              seq: 4
+            http:
+              method: GET
+              url: '{{url_cadastro}}/api/v1/clientes/documento/{{documento}}'
+              auth: inherit
+            settings:
+              encodeUrl: true
+              timeout: 0
+              followRedirects: true
+              maxRedirects: 5
+          - info:
+              name: 'Atualizar nome'
+              type: http
+              seq: 5
+            http:
+              method: PATCH
+              url: '{{url_cadastro}}/api/v1/clientes/{{clienteId}}/nome'
+              body:
+                type: json
+                data: |-
+                  {
+                    "nome": "Teste CNPJJ"
+                  }
+              auth: inherit
+            settings:
+              encodeUrl: true
+              timeout: 0
+              followRedirects: true
+              maxRedirects: 5
+          - info:
+              name: 'Atualizar telefone'
+              type: http
+              seq: 6
+            http:
+              method: PATCH
+              url: '{{url_cadastro}}/api/v1/clientes/{{clienteId}}/telefone'
+              body:
+                type: json
+                data: |-
+                  {
+                    "telefone": "(31) 99999-9999"
+                  }
+              auth: inherit
+            settings:
+              encodeUrl: true
+              timeout: 0
+              followRedirects: true
+              maxRedirects: 5
+          - info:
+              name: 'Desativar'
+              type: http
+              seq: 7
+            http:
+              method: DELETE
+              url: '{{url_cadastro}}/api/v1/clientes/{{clienteId}}'
               auth: inherit
             settings:
               encodeUrl: true
@@ -149,22 +243,20 @@ items:
               followRedirects: true
               maxRedirects: 5
       - info:
-          name: Veiculos
+          name: 'Veículos'
           type: folder
-          seq: 3
+          seq: 2
         request:
           auth: inherit
-          variables:
-            - name: route_prefix
-              value: api/v1
         items:
+          # Guarde o veiculoId retornado na variável veiculoId.
           - info:
-              name: Criar
+              name: 'Criar'
               type: http
               seq: 1
             http:
               method: POST
-              url: '{{url}}/{{route_prefix}}/veiculos'
+              url: '{{url_cadastro}}/api/v1/veiculos'
               body:
                 type: json
                 data: |-
@@ -182,12 +274,12 @@ items:
               followRedirects: true
               maxRedirects: 5
           - info:
-              name: Listar
+              name: 'Listar'
               type: http
               seq: 2
             http:
               method: GET
-              url: '{{url}}/{{route_prefix}}/veiculos'
+              url: '{{url_cadastro}}/api/v1/veiculos'
               auth: inherit
             settings:
               encodeUrl: true
@@ -195,25 +287,25 @@ items:
               followRedirects: true
               maxRedirects: 5
           - info:
-              name: Obter por cliente
-              type: http
-              seq: 4
-            http:
-              method: GET
-              url: '{{url}}/{{route_prefix}}/clientes/{{clienteId}}/veiculos'
-              auth: inherit
-            settings:
-              encodeUrl: true
-              timeout: 0
-              followRedirects: true
-              maxRedirects: 5
-          - info:
-              name: Obter por ID
+              name: 'Obter por ID'
               type: http
               seq: 3
             http:
               method: GET
-              url: '{{url}}/{{route_prefix}}/veiculos/{{veiculoId}}'
+              url: '{{url_cadastro}}/api/v1/veiculos/{{veiculoId}}'
+              auth: inherit
+            settings:
+              encodeUrl: true
+              timeout: 0
+              followRedirects: true
+              maxRedirects: 5
+          - info:
+              name: 'Obter por cliente'
+              type: http
+              seq: 4
+            http:
+              method: GET
+              url: '{{url_cadastro}}/api/v1/clientes/{{clienteId}}/veiculos'
               auth: inherit
             settings:
               encodeUrl: true
@@ -221,60 +313,20 @@ items:
               followRedirects: true
               maxRedirects: 5
       - info:
-          name: Servicos
+          name: 'Serviços'
           type: folder
-          seq: 2
+          seq: 3
         request:
           auth: inherit
-          variables:
-            - name: route_prefix
-              value: '{{api_prefix}}/servicos'
         items:
+          # Guarde o servicoId retornado na variável servicoId.
           - info:
-              name: Atualizar descricao
-              type: http
-              seq: 4
-            http:
-              method: PATCH
-              url: '{{url}}/{{route_prefix}}/{{servicoId}}/descricao'
-              body:
-                type: json
-                data: |-
-                  {
-                    "descricao": "Alinhamento"
-                  }
-              auth: inherit
-            settings:
-              encodeUrl: true
-              timeout: 0
-              followRedirects: true
-              maxRedirects: 5
-          - info:
-              name: Atualizar preco
-              type: http
-              seq: 5
-            http:
-              method: PATCH
-              url: '{{url}}/{{route_prefix}}/{{servicoId}}/preco'
-              body:
-                type: json
-                data: |-
-                  {
-                    "preco": 150
-                  }
-              auth: inherit
-            settings:
-              encodeUrl: true
-              timeout: 0
-              followRedirects: true
-              maxRedirects: 5
-          - info:
-              name: Criar
+              name: 'Criar'
               type: http
               seq: 1
             http:
               method: POST
-              url: '{{url}}/{{route_prefix}}'
+              url: '{{url_cadastro}}/api/v1/servicos'
               body:
                 type: json
                 data: |-
@@ -290,25 +342,12 @@ items:
               followRedirects: true
               maxRedirects: 5
           - info:
-              name: Desativar
-              type: http
-              seq: 6
-            http:
-              method: DELETE
-              url: '{{url}}/{{route_prefix}}/{{servicoId}}'
-              auth: inherit
-            settings:
-              encodeUrl: true
-              timeout: 0
-              followRedirects: true
-              maxRedirects: 5
-          - info:
-              name: Listar
+              name: 'Listar'
               type: http
               seq: 2
             http:
               method: GET
-              url: '{{url}}/{{route_prefix}}'
+              url: '{{url_cadastro}}/api/v1/servicos'
               auth: inherit
             settings:
               encodeUrl: true
@@ -316,12 +355,63 @@ items:
               followRedirects: true
               maxRedirects: 5
           - info:
-              name: Obter por ID
+              name: 'Obter por ID'
               type: http
               seq: 3
             http:
               method: GET
-              url: '{{url}}/{{route_prefix}}/{{servicoId}}'
+              url: '{{url_cadastro}}/api/v1/servicos/{{servicoId}}'
+              auth: inherit
+            settings:
+              encodeUrl: true
+              timeout: 0
+              followRedirects: true
+              maxRedirects: 5
+          - info:
+              name: 'Atualizar descricao'
+              type: http
+              seq: 4
+            http:
+              method: PATCH
+              url: '{{url_cadastro}}/api/v1/servicos/{{servicoId}}/descricao'
+              body:
+                type: json
+                data: |-
+                  {
+                    "descricao": "Alinhamento"
+                  }
+              auth: inherit
+            settings:
+              encodeUrl: true
+              timeout: 0
+              followRedirects: true
+              maxRedirects: 5
+          - info:
+              name: 'Atualizar preco'
+              type: http
+              seq: 5
+            http:
+              method: PATCH
+              url: '{{url_cadastro}}/api/v1/servicos/{{servicoId}}/preco'
+              body:
+                type: json
+                data: |-
+                  {
+                    "preco": 150
+                  }
+              auth: inherit
+            settings:
+              encodeUrl: true
+              timeout: 0
+              followRedirects: true
+              maxRedirects: 5
+          - info:
+              name: 'Desativar'
+              type: http
+              seq: 6
+            http:
+              method: DELETE
+              url: '{{url_cadastro}}/api/v1/servicos/{{servicoId}}'
               auth: inherit
             settings:
               encodeUrl: true
@@ -329,60 +419,20 @@ items:
               followRedirects: true
               maxRedirects: 5
   - info:
-      name: Peças e Insumos
+      name: 'Peças e Insumos'
       type: folder
-      seq: 2
+      seq: 3
     request:
       auth: inherit
-      variables:
-        - name: route_prefix
-          value: '{{api_prefix}}/pecas-insumos'
     items:
+      # Guarde o pecaInsumoId retornado na variável pecasInsumoId.
       - info:
-          name: Atualizar descricao
-          type: http
-          seq: 4
-        http:
-          method: PATCH
-          url: '{{url}}/{{route_prefix}}/{{pecasInsumoId}}/descricao'
-          body:
-            type: json
-            data: |-
-              {
-                "descricao": "Pneu aro 18"
-              }
-          auth: inherit
-        settings:
-          encodeUrl: true
-          timeout: 0
-          followRedirects: true
-          maxRedirects: 5
-      - info:
-          name: Atualizar preco
-          type: http
-          seq: 5
-        http:
-          method: PATCH
-          url: '{{url}}/{{route_prefix}}/{{pecasInsumoId}}/preco'
-          body:
-            type: json
-            data: |-
-              {
-                "preco": 150
-              }
-          auth: inherit
-        settings:
-          encodeUrl: true
-          timeout: 0
-          followRedirects: true
-          maxRedirects: 5
-      - info:
-          name: Criar
+          name: 'Criar'
           type: http
           seq: 1
         http:
           method: POST
-          url: '{{url}}/{{route_prefix}}'
+          url: '{{url_pecas_insumos}}/api/v1/pecas-insumos'
           body:
             type: json
             data: |-
@@ -399,63 +449,12 @@ items:
           followRedirects: true
           maxRedirects: 5
       - info:
-          name: Decrementar estoque
-          type: http
-          seq: 7
-        http:
-          method: PATCH
-          url: '{{url}}/{{route_prefix}}/{{pecasInsumoId}}/estoque/saida'
-          body:
-            type: json
-            data: |-
-              {
-                "quantidade": 1
-              }
-          auth: inherit
-        settings:
-          encodeUrl: true
-          timeout: 0
-          followRedirects: true
-          maxRedirects: 5
-      - info:
-          name: Desativar
-          type: http
-          seq: 8
-        http:
-          method: DELETE
-          url: '{{url}}/{{route_prefix}}/{{pecasInsumoId}}'
-          auth: inherit
-        settings:
-          encodeUrl: true
-          timeout: 0
-          followRedirects: true
-          maxRedirects: 5
-      - info:
-          name: Incrementar estoque
-          type: http
-          seq: 6
-        http:
-          method: PATCH
-          url: '{{url}}/{{route_prefix}}/{{pecasInsumoId}}/estoque/entrada'
-          body:
-            type: json
-            data: |-
-              {
-                "quantidade": 1
-              }
-          auth: inherit
-        settings:
-          encodeUrl: true
-          timeout: 0
-          followRedirects: true
-          maxRedirects: 5
-      - info:
-          name: Listar
+          name: 'Listar'
           type: http
           seq: 2
         http:
           method: GET
-          url: '{{url}}/{{route_prefix}}'
+          url: '{{url_pecas_insumos}}/api/v1/pecas-insumos'
           auth: inherit
         settings:
           encodeUrl: true
@@ -463,12 +462,115 @@ items:
           followRedirects: true
           maxRedirects: 5
       - info:
-          name: Obter por ID
+          name: 'Obter por ID'
           type: http
           seq: 3
         http:
           method: GET
-          url: '{{url}}/{{route_prefix}}/{{pecasInsumoId}}'
+          url: '{{url_pecas_insumos}}/api/v1/pecas-insumos/{{pecasInsumoId}}'
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      # Usada pela OS na abertura completa. 200 {disponivel, precoUnitario}; 404 se a peça não existir; 422 se quantidade <= 0.
+      - info:
+          name: 'Verificar disponibilidade'
+          type: http
+          seq: 4
+        http:
+          method: GET
+          url: '{{url_pecas_insumos}}/api/v1/pecas-insumos/{{pecasInsumoId}}/disponibilidade?quantidade=2'
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      - info:
+          name: 'Atualizar descricao'
+          type: http
+          seq: 5
+        http:
+          method: PATCH
+          url: '{{url_pecas_insumos}}/api/v1/pecas-insumos/{{pecasInsumoId}}/descricao'
+          body:
+            type: json
+            data: |-
+              {
+                "descricao": "Pneu aro 18"
+              }
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      - info:
+          name: 'Atualizar preco'
+          type: http
+          seq: 6
+        http:
+          method: PATCH
+          url: '{{url_pecas_insumos}}/api/v1/pecas-insumos/{{pecasInsumoId}}/preco'
+          body:
+            type: json
+            data: |-
+              {
+                "preco": 150
+              }
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      - info:
+          name: 'Incrementar estoque'
+          type: http
+          seq: 7
+        http:
+          method: PATCH
+          url: '{{url_pecas_insumos}}/api/v1/pecas-insumos/{{pecasInsumoId}}/estoque/entrada'
+          body:
+            type: json
+            data: |-
+              {
+                "quantidade": 1
+              }
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      - info:
+          name: 'Decrementar estoque'
+          type: http
+          seq: 8
+        http:
+          method: PATCH
+          url: '{{url_pecas_insumos}}/api/v1/pecas-insumos/{{pecasInsumoId}}/estoque/saida'
+          body:
+            type: json
+            data: |-
+              {
+                "quantidade": 1
+              }
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      - info:
+          name: 'Desativar'
+          type: http
+          seq: 9
+        http:
+          method: DELETE
+          url: '{{url_pecas_insumos}}/api/v1/pecas-insumos/{{pecasInsumoId}}'
           auth: inherit
         settings:
           encodeUrl: true
@@ -476,22 +578,20 @@ items:
           followRedirects: true
           maxRedirects: 5
   - info:
-      name: Ordens de Serviço
+      name: 'Ordens de Serviço'
       type: folder
-      seq: 3
+      seq: 4
     request:
       auth: inherit
-      variables:
-        - name: route_prefix
-          value: '{{api_prefix}}/ordens-servico'
     items:
+      # Abre a OS em Recebida. Guarde o id retornado em ordemServicoId.
       - info:
-          name: Gerar
+          name: 'Gerar'
           type: http
           seq: 1
         http:
           method: POST
-          url: '{{url}}/{{route_prefix}}'
+          url: '{{url_ordens_servico}}/api/v1/ordens-servico'
           body:
             type: json
             data: |-
@@ -505,158 +605,14 @@ items:
           timeout: 0
           followRedirects: true
           maxRedirects: 5
+      # Abre a OS já em AguardandoAprovacao e publica OrcamentoGerado (o PecasInsumos baixa as peças). Guarde o id em ordemServicoId.
       - info:
-          name: Listar por Cliente
+          name: 'Abrir Completa'
           type: http
           seq: 2
         http:
-          method: GET
-          url: '{{url}}/{{route_prefix}}?clienteId={{clienteId}}'
-          auth: inherit
-        settings:
-          encodeUrl: true
-          timeout: 0
-          followRedirects: true
-          maxRedirects: 5
-      - info:
-          name: Obter por ID
-          type: http
-          seq: 3
-        http:
-          method: GET
-          url: '{{url}}/{{route_prefix}}/{{ordemServicoId}}'
-          auth: inherit
-        settings:
-          encodeUrl: true
-          timeout: 0
-          followRedirects: true
-          maxRedirects: 5
-      - info:
-          name: Iniciar Diagnóstico
-          type: http
-          seq: 4
-        http:
-          method: PATCH
-          url: '{{url}}/{{route_prefix}}/{{ordemServicoId}}/iniciar-diagnostico'
-          auth: inherit
-        settings:
-          encodeUrl: true
-          timeout: 0
-          followRedirects: true
-          maxRedirects: 5
-      - info:
-          name: Registrar Diagnóstico
-          type: http
-          seq: 5
-        http:
-          method: PATCH
-          url: '{{url}}/{{route_prefix}}/{{ordemServicoId}}/registrar-diagnostico'
-          body:
-            type: json
-            data: |-
-              {
-                "descricaoDiagnostico": "Diagnóstico completo do veículo",
-                "servicos": [
-                  {
-                    "servicoId": "{{servicoId}}",
-                    "quantidade": 1
-                  }
-                ],
-                "pecas": [
-                  {
-                    "pecaInsumoId": "{{pecasInsumoId}}",
-                    "quantidade": 1
-                  }
-                ]
-              }
-          auth: inherit
-        settings:
-          encodeUrl: true
-          timeout: 0
-          followRedirects: true
-          maxRedirects: 5
-      - info:
-          name: Aprovar Orçamento
-          type: http
-          seq: 6
-        http:
-          method: PATCH
-          url: '{{url}}/{{route_prefix}}/{{ordemServicoId}}/aprovar-orcamento'
-          # Rota de papel Cliente (RFC-001 §4.2): sobrescreve o Authorization herdado
-          # da collection (token da oficina), que aqui receberia 403.
-          headers:
-            - name: Authorization
-              value: Bearer {{token_cliente}}
-          auth: inherit
-        settings:
-          encodeUrl: true
-          timeout: 0
-          followRedirects: true
-          maxRedirects: 5
-      - info:
-          name: Rejeitar Orçamento
-          type: http
-          seq: 7
-        http:
-          method: PATCH
-          url: '{{url}}/{{route_prefix}}/{{ordemServicoId}}/rejeitar-orcamento'
-          # Rota de papel Cliente (RFC-001 §4.2): sobrescreve o Authorization herdado
-          # da collection (token da oficina), que aqui receberia 403.
-          headers:
-            - name: Authorization
-              value: Bearer {{token_cliente}}
-          auth: inherit
-        settings:
-          encodeUrl: true
-          timeout: 0
-          followRedirects: true
-          maxRedirects: 5
-      - info:
-          name: Executar
-          type: http
-          seq: 8
-        http:
-          method: PATCH
-          url: '{{url}}/{{route_prefix}}/{{ordemServicoId}}/executar'
-          auth: inherit
-        settings:
-          encodeUrl: true
-          timeout: 0
-          followRedirects: true
-          maxRedirects: 5
-      - info:
-          name: Finalizar
-          type: http
-          seq: 9
-        http:
-          method: PATCH
-          url: '{{url}}/{{route_prefix}}/{{ordemServicoId}}/finalizar'
-          auth: inherit
-        settings:
-          encodeUrl: true
-          timeout: 0
-          followRedirects: true
-          maxRedirects: 5
-      - info:
-          name: Concluir
-          type: http
-          seq: 10
-        http:
-          method: PATCH
-          url: '{{url}}/{{route_prefix}}/{{ordemServicoId}}/concluir'
-          auth: inherit
-        settings:
-          encodeUrl: true
-          timeout: 0
-          followRedirects: true
-          maxRedirects: 5
-      - info:
-          name: Abrir Completa
-          type: http
-          seq: 11
-        http:
           method: POST
-          url: '{{url}}/{{route_prefix}}/completa'
+          url: '{{url_ordens_servico}}/api/v1/ordens-servico/completa'
           body:
             type: json
             data: |-
@@ -683,12 +639,12 @@ items:
           followRedirects: true
           maxRedirects: 5
       - info:
-          name: Obter Status
+          name: 'Listar por Cliente'
           type: http
-          seq: 12
+          seq: 3
         http:
           method: GET
-          url: '{{url}}/{{route_prefix}}/{{ordemServicoId}}/status'
+          url: '{{url_ordens_servico}}/api/v1/ordens-servico?clienteId={{clienteId}}'
           auth: inherit
         settings:
           encodeUrl: true
@@ -696,17 +652,145 @@ items:
           followRedirects: true
           maxRedirects: 5
       - info:
-          name: Listar para Acompanhamento
+          name: 'Obter por ID'
           type: http
-          seq: 13
+          seq: 4
         http:
           method: GET
-          url: '{{url}}/{{route_prefix}}/acompanhamento'
-          # Rota de papel Cliente (RFC-001 §4.2): sobrescreve o Authorization herdado
-          # da collection (token da oficina), que aqui receberia 403.
+          url: '{{url_ordens_servico}}/api/v1/ordens-servico/{{ordemServicoId}}'
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      - info:
+          name: 'Obter Status'
+          type: http
+          seq: 5
+        http:
+          method: GET
+          url: '{{url_ordens_servico}}/api/v1/ordens-servico/{{ordemServicoId}}/status'
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      - info:
+          name: 'Listar para Acompanhamento'
+          type: http
+          seq: 6
+        http:
+          method: GET
+          url: '{{url_ordens_servico}}/api/v1/ordens-servico/acompanhamento'
           headers:
             - name: Authorization
-              value: Bearer {{token_cliente}}
+              value: 'Bearer {{token_cliente}}'
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      - info:
+          name: 'Iniciar Diagnóstico'
+          type: http
+          seq: 7
+        http:
+          method: PATCH
+          url: '{{url_ordens_servico}}/api/v1/ordens-servico/{{ordemServicoId}}/iniciar-diagnostico'
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      - info:
+          name: 'Registrar Diagnóstico'
+          type: http
+          seq: 8
+        http:
+          method: PATCH
+          url: '{{url_ordens_servico}}/api/v1/ordens-servico/{{ordemServicoId}}/registrar-diagnostico'
+          body:
+            type: json
+            data: |-
+              {
+                "descricaoDiagnostico": "Diagnóstico completo do veículo",
+                "servicos": [
+                  {
+                    "servicoId": "{{servicoId}}",
+                    "quantidade": 1
+                  }
+                ],
+                "pecas": [
+                  {
+                    "pecaInsumoId": "{{pecasInsumoId}}",
+                    "quantidade": 1
+                  }
+                ]
+              }
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      # Publica OrcamentoAprovado: o serviço Pagamento cria o pagamento Pendente. A OS continua em AguardandoAprovacao até o pagamento ser aprovado.
+      - info:
+          name: 'Aprovar Orçamento'
+          type: http
+          seq: 9
+        http:
+          method: PATCH
+          url: '{{url_ordens_servico}}/api/v1/ordens-servico/{{ordemServicoId}}/aprovar-orcamento'
+          headers:
+            - name: Authorization
+              value: 'Bearer {{token_cliente}}'
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      # Publica OrcamentoRejeitado: o PecasInsumos estorna as peças.
+      - info:
+          name: 'Rejeitar Orçamento'
+          type: http
+          seq: 10
+        http:
+          method: PATCH
+          url: '{{url_ordens_servico}}/api/v1/ordens-servico/{{ordemServicoId}}/rejeitar-orcamento'
+          headers:
+            - name: Authorization
+              value: 'Bearer {{token_cliente}}'
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      - info:
+          name: 'Finalizar'
+          type: http
+          seq: 11
+        http:
+          method: PATCH
+          url: '{{url_ordens_servico}}/api/v1/ordens-servico/{{ordemServicoId}}/finalizar'
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      - info:
+          name: 'Concluir'
+          type: http
+          seq: 12
+        http:
+          method: PATCH
+          url: '{{url_ordens_servico}}/api/v1/ordens-servico/{{ordemServicoId}}/concluir'
           auth: inherit
         settings:
           encodeUrl: true
@@ -714,25 +798,153 @@ items:
           followRedirects: true
           maxRedirects: 5
   - info:
-      name: Autenticacao
+      name: 'Pagamento'
       type: folder
-      seq: 4
+      seq: 5
     request:
       auth: inherit
-      variables:
-        - name: route_prefix
-          value: '{{api_prefix}}/auth'
     items:
+      # Cliente (só o dono) ou Oficina. Lista {pagamentoId, ordemServicoId, orcamentoId, valor, status, motivoRecusa, criadoEm, atualizadoEm}.
       - info:
-          name: Login
+          name: 'Listar pagamentos da OS'
           type: http
           seq: 1
         http:
-          method: post
-          url: '{{url}}/{{route_prefix}}/login'
+          method: GET
+          url: '{{url_pagamento}}/api/v1/pagamentos/ordens-servico/{{ordemServicoId}}'
+          headers:
+            - name: Authorization
+              value: 'Bearer {{token_cliente}}'
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      # Titular APRO: o mock do Mercado Pago aprova; publica PagamentoAprovado e a OS passa a EmExecucao. 404 sem pagamento Pendente; 403 se não for o dono.
+      - info:
+          name: 'Pagar — APRO (aprovado)'
+          type: http
+          seq: 2
+        http:
+          method: POST
+          url: '{{url_pagamento}}/api/v1/pagamentos/ordens-servico/{{ordemServicoId}}/pagar'
+          headers:
+            - name: Authorization
+              value: 'Bearer {{token_cliente}}'
+          body:
+            type: json
+            data: |-
+              {
+                "titularCartao": "APRO"
+              }
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      # Qualquer titular diferente de APRO é recusado (cc_rejected_other_reason): publica PagamentoRecusado, a OS rejeita o orçamento e o PecasInsumos estorna as peças.
+      - info:
+          name: 'Pagar — OTHE (recusado)'
+          type: http
+          seq: 3
+        http:
+          method: POST
+          url: '{{url_pagamento}}/api/v1/pagamentos/ordens-servico/{{ordemServicoId}}/pagar'
+          headers:
+            - name: Authorization
+              value: 'Bearer {{token_cliente}}'
+          body:
+            type: json
+            data: |-
+              {
+                "titularCartao": "OTHE"
+              }
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+  - info:
+      name: 'Mock Mercado Pago (somente local)'
+      type: folder
+      seq: 6
+    request:
+      auth: inherit
+    items:
+      # Credenciais de desenvolvimento local. Copie access_token para mp_access_token. 401 se as credenciais não forem as configuradas.
+      - info:
+          name: 'Obter access_token'
+          type: http
+          seq: 1
+        http:
+          method: POST
+          url: '{{url_pagamento}}/mock/mercadopago/oauth/token'
           headers:
             - name: Content-Type
-              value: application/json
+              value: 'application/json'
+          body:
+            type: json
+            data: |-
+              {
+                "client_id": "mp-dev-client",
+                "client_secret": "mp-dev-secret",
+                "grant_type": "client_credentials"
+              }
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      # Bearer = access_token do mock. card_holder_name APRO -> approved/accredited; outro valor -> rejected/cc_rejected_other_reason.
+      - info:
+          name: 'Criar pagamento'
+          type: http
+          seq: 2
+        http:
+          method: POST
+          url: '{{url_pagamento}}/mock/mercadopago/v1/payments'
+          headers:
+            - name: Authorization
+              value: 'Bearer {{mp_access_token}}'
+            - name: Content-Type
+              value: 'application/json'
+          body:
+            type: json
+            data: |-
+              {
+                "transaction_amount": 241.8,
+                "external_reference": "orcamento-exemplo",
+                "description": "Pagamento de teste",
+                "card_holder_name": "APRO"
+              }
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+  - info:
+      name: 'Fluxo da Saga'
+      type: folder
+      seq: 7
+    request:
+      auth: inherit
+    items:
+      # Copie o campo token da resposta para token_oficina (variável do ambiente).
+      - info:
+          name: '1. Login (oficina) -> token_oficina'
+          type: http
+          seq: 1
+        http:
+          method: POST
+          url: '{{url_autenticacao}}/api/v1/auth/login'
+          headers:
+            - name: Content-Type
+              value: 'application/json'
           body:
             type: json
             data: |-
@@ -742,30 +954,321 @@ items:
               }
           auth: inherit
         settings:
-          encodeUrl: false
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      # Guarde o clienteId retornado na variável clienteId.
+      - info:
+          name: '2. Criar cliente -> clienteId'
+          type: http
+          seq: 2
+        http:
+          method: POST
+          url: '{{url_cadastro}}/api/v1/clientes'
+          body:
+            type: json
+            data: |-
+              {
+                "nome": "Teste CNPJ",
+                "documento": "07.287.471/0001-71",
+                "email": "testecpnj@email.com",
+                "telefone": "31999999998",
+                "pessoaFisica": false
+              }
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      # Guarde o veiculoId retornado na variável veiculoId.
+      - info:
+          name: '3. Criar veículo -> veiculoId'
+          type: http
+          seq: 3
+        http:
+          method: POST
+          url: '{{url_cadastro}}/api/v1/veiculos'
+          body:
+            type: json
+            data: |-
+              {
+                "placa": "HIJ1K25",
+                "modelo": "Onix",
+                "marca": "Chevrolet",
+                "ano": 2027,
+                "clienteId": "{{clienteId}}"
+              }
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      # Guarde o servicoId retornado na variável servicoId.
+      - info:
+          name: '4. Criar serviço -> servicoId'
+          type: http
+          seq: 4
+        http:
+          method: POST
+          url: '{{url_cadastro}}/api/v1/servicos'
+          body:
+            type: json
+            data: |-
+              {
+                "nome": "Troca de óleo",
+                "descricao": "Alinhamento de pneus",
+                "preco": 120.99
+              }
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      # Guarde o pecaInsumoId retornado na variável pecasInsumoId.
+      - info:
+          name: '5. Criar peça -> pecasInsumoId'
+          type: http
+          seq: 5
+        http:
+          method: POST
+          url: '{{url_pecas_insumos}}/api/v1/pecas-insumos'
+          body:
+            type: json
+            data: |-
+              {
+                "nome": "Pneu",
+                "preco": 200,
+                "quantidadeEmEstoque": 0,
+                "unidadeDeMedida": "Unidade"
+              }
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      - info:
+          name: '6. Incrementar estoque (+10)'
+          type: http
+          seq: 6
+        http:
+          method: PATCH
+          url: '{{url_pecas_insumos}}/api/v1/pecas-insumos/{{pecasInsumoId}}/estoque/entrada'
+          body:
+            type: json
+            data: |-
+              {
+                "quantidade": 10
+              }
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      # Publica OrcamentoGerado. Guarde o id em ordemServicoId.
+      - info:
+          name: '7. Abrir OS completa (2 peças) -> ordemServicoId'
+          type: http
+          seq: 7
+        http:
+          method: POST
+          url: '{{url_ordens_servico}}/api/v1/ordens-servico/completa'
+          body:
+            type: json
+            data: |-
+              {
+                "clienteId": "{{clienteId}}",
+                "veiculoId": "{{veiculoId}}",
+                "servicos": [
+                  {
+                    "servicoId": "{{servicoId}}",
+                    "quantidade": 1
+                  }
+                ],
+                "pecas": [
+                  {
+                    "pecaInsumoId": "{{pecasInsumoId}}",
+                    "quantidade": 2
+                  }
+                ]
+              }
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      # Aguarde alguns segundos: a baixa é assíncrona.
+      - info:
+          name: '8. Conferir estoque (baixou 2)'
+          type: http
+          seq: 8
+        http:
+          method: GET
+          url: '{{url_pecas_insumos}}/api/v1/pecas-insumos/{{pecasInsumoId}}'
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      - info:
+          name: '9. Aprovar orçamento (cliente)'
+          type: http
+          seq: 9
+        http:
+          method: PATCH
+          url: '{{url_ordens_servico}}/api/v1/ordens-servico/{{ordemServicoId}}/aprovar-orcamento'
+          headers:
+            - name: Authorization
+              value: 'Bearer {{token_cliente}}'
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      # Aguarde alguns segundos: o pagamento Pendente é criado pelo evento OrcamentoAprovado.
+      - info:
+          name: '10. Listar pagamentos (Pendente)'
+          type: http
+          seq: 10
+        http:
+          method: GET
+          url: '{{url_pagamento}}/api/v1/pagamentos/ordens-servico/{{ordemServicoId}}'
+          headers:
+            - name: Authorization
+              value: 'Bearer {{token_cliente}}'
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      - info:
+          name: '11a. Pagar — APRO (caminho feliz)'
+          type: http
+          seq: 11
+        http:
+          method: POST
+          url: '{{url_pagamento}}/api/v1/pagamentos/ordens-servico/{{ordemServicoId}}/pagar'
+          headers:
+            - name: Authorization
+              value: 'Bearer {{token_cliente}}'
+          body:
+            type: json
+            data: |-
+              {
+                "titularCartao": "APRO"
+              }
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      - info:
+          name: '11b. Pagar — OTHE (compensação; use no lugar da 11a)'
+          type: http
+          seq: 12
+        http:
+          method: POST
+          url: '{{url_pagamento}}/api/v1/pagamentos/ordens-servico/{{ordemServicoId}}/pagar'
+          headers:
+            - name: Authorization
+              value: 'Bearer {{token_cliente}}'
+          body:
+            type: json
+            data: |-
+              {
+                "titularCartao": "OTHE"
+              }
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      # Aguarde alguns segundos pelo evento de pagamento.
+      - info:
+          name: '12. Conferir a OS (EmExecucao com APRO; orçamento Rejeitado com OTHE)'
+          type: http
+          seq: 13
+        http:
+          method: GET
+          url: '{{url_ordens_servico}}/api/v1/ordens-servico/{{ordemServicoId}}'
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      - info:
+          name: '13. Conferir estoque (com OTHE, estornou as 2 peças)'
+          type: http
+          seq: 14
+        http:
+          method: GET
+          url: '{{url_pecas_insumos}}/api/v1/pecas-insumos/{{pecasInsumoId}}'
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      - info:
+          name: '14. Finalizar (só no caminho feliz)'
+          type: http
+          seq: 15
+        http:
+          method: PATCH
+          url: '{{url_ordens_servico}}/api/v1/ordens-servico/{{ordemServicoId}}/finalizar'
+          auth: inherit
+        settings:
+          encodeUrl: true
+          timeout: 0
+          followRedirects: true
+          maxRedirects: 5
+      - info:
+          name: '15. Concluir -> Entregue (só no caminho feliz)'
+          type: http
+          seq: 16
+        http:
+          method: PATCH
+          url: '{{url_ordens_servico}}/api/v1/ordens-servico/{{ordemServicoId}}/concluir'
+          auth: inherit
+        settings:
+          encodeUrl: true
           timeout: 0
           followRedirects: true
           maxRedirects: 5
 request:
-  # Autenticação padrão da collection: token de papel Oficina (RFC-001 §4.2).
-  # As três rotas de papel Cliente (Aprovar Orçamento, Rejeitar Orçamento e
-  # Listar para Acompanhamento) sobrescrevem este header com {{token_cliente}}.
-  # Autenticacao > Login é anônima e ignora o header.
+  # Autenticação padrão: token de papel Oficina. As requisições de papel Cliente sobrescrevem este
+  # header com {{token_cliente}}; as anônimas (Login, Lambda, mock) o ignoram.
   headers:
     - name: Authorization
       value: Bearer {{token_oficina}}
   variables:
-    - name: api_prefix
-      value: api/v1
     - name: clienteId
-      value: 01fb6838-c929-4095-8da6-eece5d1876c6
+      value: '01fb6838-c929-4095-8da6-eece5d1876c6'
     - name: veiculoId
-      value: 65d1ac22-2b99-4e69-96a2-828270dac950
+      value: '65d1ac22-2b99-4e69-96a2-828270dac950'
     - name: servicoId
-      value: 3967b433-5e3e-409e-b5a4-43d6e723c067
+      value: '3967b433-5e3e-409e-b5a4-43d6e723c067'
     - name: pecasInsumoId
-      value: 272ec4ba-81f9-4398-99d2-9bd29e0d9c50
+      value: '272ec4ba-81f9-4398-99d2-9bd29e0d9c50'
     - name: ordemServicoId
+      value: ''
+    - name: documento
+      value: '07287471000171'
+    - name: cpf
+      value: '52998224725'
+    - name: mp_access_token
       value: ''
 bundled: true
 extensions:
@@ -773,5 +1276,3 @@ extensions:
     ignore:
       - node_modules
       - .git
-    exportedAt: '2026-05-27T01:22:17.466Z'
-    exportedUsing: Bruno

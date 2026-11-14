@@ -2,7 +2,17 @@
 
 > **Pré-requisito:** Ter executado pelo menos os passos 1–5 do [`teste-cenario-feliz.md`](teste-cenario-feliz.md)
 > para ter `{CLIENTE_ID}`, `{VEICULO_ID}`, `{SERVICO_ID}` e `{PECA_ID}` disponíveis.
-> Base URL: `http://localhost:8080`
+> Base URL da OS: `http://localhost:8080`; os demais serviços usam as portas indicadas abaixo.
+>
+> **Fase 4 — serviços separados.** Cada módulo roda como um serviço, em uma porta própria
+> (`docker compose up` de cada repositório, mais `docker-compose.infra.yml` — ver o
+> [README](../../README.md#execução-local)): **autenticacao** `8081` (login), **cadastro** `8082`
+> (clientes, veículos, serviços), **pecas-insumos** `8083`, **ordens-servico** `8080` e **pagamento**
+> `8084`. As URLs deste guia já usam essas portas; na nuvem, todas passam a ser o endpoint do
+> API Gateway. A baixa e o estorno de estoque são **assíncronos** (eventos): depois de gerar ou
+> rejeitar um orçamento, aguarde alguns segundos antes de conferir o estoque. A rota
+> `PATCH /ordens-servico/{id}/executar` **não existe mais**: a OS entra em execução quando o
+> **pagamento é aprovado** (Passo 11 do cenário feliz).
 >
 > **Tokens:** este guia assume as variáveis `$TOKEN_OFICINA` e `$TOKEN_CLIENTE` já exportadas —
 > veja o **Passo 0** do [`teste-cenario-feliz.md`](teste-cenario-feliz.md#passo-0--obter-os-tokens).
@@ -12,21 +22,22 @@
 ## Tokens usados neste guia
 
 A autorização é por papel (ver [RFC-001 §4.2](../arquitetura/rfcs/001-estrategia-de-autenticacao.md)).
-Todos os cenários abaixo usam `$TOKEN_OFICINA`, **exceto** os que aprovam ou rejeitam orçamento
-(A11 e A13c), que exigem `$TOKEN_CLIENTE`.
+Todos os cenários abaixo usam `$TOKEN_OFICINA`, **exceto** os que aprovam, rejeitam ou pagam o
+orçamento (A11, A12, A13c e A21), que exigem `$TOKEN_CLIENTE`.
 
 | Rota usada aqui | Token |
 |---|---|
 | `PATCH /ordens-servico/{id}/aprovar-orcamento` (A11) | `$TOKEN_CLIENTE` (papel `Cliente`) |
 | `PATCH /ordens-servico/{id}/rejeitar-orcamento` (A13c) | `$TOKEN_CLIENTE` (papel `Cliente`) |
+| `POST /pagamentos/ordens-servico/{id}/pagar` (A12, A21) | `$TOKEN_CLIENTE` (papel `Cliente`) |
 | Todas as demais | `$TOKEN_OFICINA` (papel `Oficina`) |
 
 > ⚠️ Nos dois cenários com `$TOKEN_CLIENTE`, o `sub` do token precisa ser o **dono da OS**
 > (`{CLIENTE_ID}`). Se for outro cliente, a resposta é **403 Forbidden** — e não o 422 ou 200
 > que o cenário espera, o que faz o teste parecer falhar por outro motivo.
 >
-> Como a Function Serverless que emite o token de cliente **ainda não existe**, esse token só é
-> obtido manualmente (ver Passo 0 do guia do cenário feliz).
+> Em ambiente local a Function Serverless que emite o token de cliente não roda, então esse token
+> é obtido manualmente (ver Passo 0 do guia do cenário feliz).
 
 ---
 
@@ -45,7 +56,7 @@ Todos os cenários abaixo usam `$TOKEN_OFICINA`, **exceto** os que aprovam ou re
 | A9 | Registrar diagnóstico com serviço inexistente | OrdemServico | 422 |
 | A10 | Registrar diagnóstico sem itens de peças | OrdemServico | 422 |
 | A11 | Transição de estado inválida (pular etapa) | OrdemServico | 422 |
-| A12 | Executar OS sem orçamento aprovado | OrdemServico | 422 |
+| A12 | Pagar sem pagamento pendente | Pagamento | 404 |
 | A13 | **Rejeição de orçamento + estorno de estoque** | OrdemServico + PecasInsumos | 200 + estorno |
 | A14 | Concluir OS sem notificação ao cliente | OrdemServico | 422 |
 | A15 | Decrementar estoque além do disponível | PecasInsumos | 422 |
@@ -54,13 +65,14 @@ Todos os cenários abaixo usam `$TOKEN_OFICINA`, **exceto** os que aprovam ou re
 | A18 | Abrir OS completa (`/completa`) sem peças | OrdemServico | 422 |
 | A19 | Abrir OS completa (`/completa`) com peça indisponível | OrdemServico + PecasInsumos | 422 |
 | A20 | Consultar status (`/{id}/status`) de OS inexistente | OrdemServico | 404 |
+| A21 | **Pagamento recusado (`OTHE`) + compensação** | Pagamento + OrdemServico + PecasInsumos | 200 + orçamento rejeitado + estorno |
 
 ---
 
 ## A1 — CPF Inválido no Cadastro de Cliente
 
 ```bash
-curl -s -X POST http://localhost:8080/api/v1/clientes \
+curl -s -X POST http://localhost:8082/api/v1/clientes \
   -H "Authorization: Bearer $TOKEN_OFICINA" \
   -H "Content-Type: application/json" \
   -d '{
@@ -89,7 +101,7 @@ curl -s -X POST http://localhost:8080/api/v1/clientes \
 ## A2 — CNPJ Inválido no Cadastro de Cliente
 
 ```bash
-curl -s -X POST http://localhost:8080/api/v1/clientes \
+curl -s -X POST http://localhost:8082/api/v1/clientes \
   -H "Authorization: Bearer $TOKEN_OFICINA" \
   -H "Content-Type: application/json" \
   -d '{
@@ -117,7 +129,7 @@ curl -s -X POST http://localhost:8080/api/v1/clientes \
 Testa uma placa que não é nem Mercosul (`ABC1D23`) nem padrão antigo (`ABC-1234`).
 
 ```bash
-curl -s -X POST http://localhost:8080/api/v1/veiculos \
+curl -s -X POST http://localhost:8082/api/v1/veiculos \
   -H "Authorization: Bearer $TOKEN_OFICINA" \
   -H "Content-Type: application/json" \
   -d '{
@@ -147,7 +159,7 @@ curl -s -X POST http://localhost:8080/api/v1/veiculos \
 Tenta cadastrar um segundo cliente com o mesmo CPF do passo 1 do cenário feliz.
 
 ```bash
-curl -s -X POST http://localhost:8080/api/v1/clientes \
+curl -s -X POST http://localhost:8082/api/v1/clientes \
   -H "Authorization: Bearer $TOKEN_OFICINA" \
   -H "Content-Type: application/json" \
   -d '{
@@ -175,7 +187,7 @@ curl -s -X POST http://localhost:8080/api/v1/clientes \
 Tenta cadastrar um segundo veículo com a mesma placa `ABC1D23` do cenário feliz.
 
 ```bash
-curl -s -X POST http://localhost:8080/api/v1/veiculos \
+curl -s -X POST http://localhost:8082/api/v1/veiculos \
   -H "Authorization: Bearer $TOKEN_OFICINA" \
   -H "Content-Type: application/json" \
   -d '{
@@ -230,7 +242,7 @@ Crie um segundo cliente e tente abrir OS usando o veículo do primeiro cliente.
 
 **7a — Criar segundo cliente:**
 ```bash
-curl -s -X POST http://localhost:8080/api/v1/clientes \
+curl -s -X POST http://localhost:8082/api/v1/clientes \
   -H "Authorization: Bearer $TOKEN_OFICINA" \
   -H "Content-Type: application/json" \
   -d '{
@@ -273,7 +285,7 @@ Depois crie uma peça com estoque zero e tente usá-la no diagnóstico.
 
 **8a — Criar peça com estoque zero:**
 ```bash
-curl -s -X POST http://localhost:8080/api/v1/pecas-insumos \
+curl -s -X POST http://localhost:8083/api/v1/pecas-insumos \
   -H "Authorization: Bearer $TOKEN_OFICINA" \
   -H "Content-Type: application/json" \
   -d '{
@@ -415,44 +427,30 @@ curl -s -X PATCH http://localhost:8080/api/v1/ordens-servico/$OS3_ID/aprovar-orc
 ```
 
 > ✅ Testes adicionais de transição inválida:
-> - `PATCH /executar` em status `Recebida` → 422
 > - `PATCH /finalizar` em status `AguardandoAprovacao` → 422
 > - `PATCH /concluir` em status `EmExecucao` (sem finalizar) → 422
 
 ---
 
-## A12 — Executar OS com Orçamento Aprovado Ausente
+## A12 — Pagar sem Pagamento Pendente
 
-O domínio exige orçamento com status `Aprovado` para transitar para `EmExecucao`.
-Tenta executar uma OS em `AguardandoAprovacao` sem aprovar o orçamento primeiro.
+> 🔑 **Token:** `$TOKEN_CLIENTE` (papel `Cliente`).
+
+A execução da OS só acontece pelo evento de pagamento aprovado, e o pagamento `Pendente` só existe
+depois que o cliente aprova o orçamento. Tentar pagar uma OS cujo orçamento ainda não foi aprovado
+não encontra pagamento para cobrar:
 
 ```bash
-# Use OS3_ID do cenário A11
-# Leve a OS até AguardandoAprovacao normalmente:
-curl -s -X PATCH http://localhost:8080/api/v1/ordens-servico/$OS3_ID/iniciar-diagnostico
-
-curl -s -X PATCH http://localhost:8080/api/v1/ordens-servico/$OS3_ID/registrar-diagnostico \
-  -H "Authorization: Bearer $TOKEN_OFICINA" \
+# Use OS3_ID do cenário A11 (OS em AguardandoAprovacao, orçamento Enviado, ainda não aprovado)
+curl -s -X POST http://localhost:8084/api/v1/pagamentos/ordens-servico/$OS3_ID/pagar \
+  -H "Authorization: Bearer $TOKEN_CLIENTE" \
   -H "Content-Type: application/json" \
-  -d '{
-    "descricaoDiagnostico": "Teste de transição.",
-    "servicos": [{ "servicoId": "{SERVICO_ID}", "quantidade": 1 }],
-    "pecas": [{ "pecaInsumoId": "{PECA_ID}", "quantidade": 1 }]
-  }'
-
-# (aguardar GET para confirmar AguardandoAprovacao, depois tentar executar sem aprovar)
-curl -s -X PATCH http://localhost:8080/api/v1/ordens-servico/$OS3_ID/executar \
-  -H "Authorization: Bearer $TOKEN_OFICINA" | jq .
+  -d '{"titularCartao": "APRO"}' | jq .
 ```
 
-**Resultado esperado:** `422 Unprocessable Entity`
-
-```json
-{
-  "code": "OrdemServico.TransicaoInvalida",
-  "description": "Ordem de Serviço só pode iniciar execução quando o orçamento está Aprovado."
-}
-```
+**Resultado esperado:** `404 Not Found` (não há pagamento `Pendente` para a OS). A OS permanece
+`AguardandoAprovacao`. O mesmo `404` ocorre ao pagar de novo uma OS cujo pagamento já foi resolvido
+(aprovado, recusado ou cancelado).
 
 ---
 
@@ -468,7 +466,7 @@ integration event `OrcamentoRejeitadoIntegrationEvent` → estorno em PecasInsum
 ### Preparação — verificar estoque antes
 
 ```bash
-curl -s http://localhost:8080/api/v1/pecas-insumos/{PECA_ID} | jq '.quantidadeEstoque'
+curl -s http://localhost:8083/api/v1/pecas-insumos/{PECA_ID} | jq '.quantidadeEstoque'
 ```
 
 > 📝 Anote o valor atual (deve ser **8** se veio do cenário feliz, ou **10** se é início).
@@ -506,7 +504,7 @@ curl -s -X PATCH http://localhost:8080/api/v1/ordens-servico/$OS_REJEICAO_ID/reg
 ### 13b — Verificar estoque decrementado (antes da rejeição)
 
 ```bash
-curl -s http://localhost:8080/api/v1/pecas-insumos/{PECA_ID} | jq '.quantidadeEstoque'
+curl -s http://localhost:8083/api/v1/pecas-insumos/{PECA_ID} | jq '.quantidadeEstoque'
 ```
 
 > ✅ Estoque deve ter diminuído **3 unidades** (decremento automático via integration event).
@@ -538,14 +536,15 @@ curl -s -X PATCH http://localhost:8080/api/v1/ordens-servico/$OS_REJEICAO_ID/rej
 ### 13d — Verificar estoque estornado (após a rejeição)
 
 ```bash
-curl -s http://localhost:8080/api/v1/pecas-insumos/{PECA_ID} | jq '.quantidadeEstoque'
+curl -s http://localhost:8083/api/v1/pecas-insumos/{PECA_ID} | jq '.quantidadeEstoque'
 ```
 
 **Resultado esperado:** estoque voltou ao valor anterior à geração do orçamento.
 
 > ✅ O domain event `OrcamentoRejeitado` → integration event
 > `OrcamentoRejeitadoIntegrationEvent` → handler `IncrementarEstoqueQuandoOrcamentoRejeitado`
-> devolveu as 3 unidades ao estoque.
+> (no serviço PecasInsumos) devolveu as 3 unidades ao estoque. O estorno é assíncrono: aguarde alguns
+> segundos antes de conferir.
 
 ### 13e — Verificar OS após rejeição
 
@@ -585,7 +584,7 @@ if (Status != StatusOrdemServico.Finalizada || NotificadoEm == null)
 
 ```bash
 # Tenta decrementar mais do que há em estoque
-curl -s -X PATCH http://localhost:8080/api/v1/pecas-insumos/{PECA_ID}/estoque/saida \
+curl -s -X PATCH http://localhost:8083/api/v1/pecas-insumos/{PECA_ID}/estoque/saida \
   -H "Authorization: Bearer $TOKEN_OFICINA" \
   -H "Content-Type: application/json" \
   -d '{
@@ -610,28 +609,28 @@ curl -s -X PATCH http://localhost:8080/api/v1/pecas-insumos/{PECA_ID}/estoque/sa
 
 **Cliente inexistente:**
 ```bash
-curl -s http://localhost:8080/api/v1/clientes/00000000-0000-0000-0000-000000000099 \
+curl -s http://localhost:8082/api/v1/clientes/00000000-0000-0000-0000-000000000099 \
   -H "Authorization: Bearer $TOKEN_OFICINA" | jq .
 # Esperado: 404
 ```
 
 **Veículo inexistente:**
 ```bash
-curl -s http://localhost:8080/api/v1/veiculos/00000000-0000-0000-0000-000000000099 \
+curl -s http://localhost:8082/api/v1/veiculos/00000000-0000-0000-0000-000000000099 \
   -H "Authorization: Bearer $TOKEN_OFICINA" | jq .
 # Esperado: 404
 ```
 
 **Serviço inexistente:**
 ```bash
-curl -s http://localhost:8080/api/v1/servicos/00000000-0000-0000-0000-000000000099 \
+curl -s http://localhost:8082/api/v1/servicos/00000000-0000-0000-0000-000000000099 \
   -H "Authorization: Bearer $TOKEN_OFICINA" | jq .
 # Esperado: 404
 ```
 
 **Peça/Insumo inexistente:**
 ```bash
-curl -s http://localhost:8080/api/v1/pecas-insumos/00000000-0000-0000-0000-000000000099 \
+curl -s http://localhost:8083/api/v1/pecas-insumos/00000000-0000-0000-0000-000000000099 \
   -H "Authorization: Bearer $TOKEN_OFICINA" | jq .
 # Esperado: 404
 ```
@@ -718,7 +717,7 @@ curl -s -X POST http://localhost:8080/api/v1/ordens-servico/completa \
 
 ```bash
 # Criar peça com estoque zero
-PECA_SEM_ESTOQUE_ID=$(curl -s -X POST http://localhost:8080/api/v1/pecas-insumos \
+PECA_SEM_ESTOQUE_ID=$(curl -s -X POST http://localhost:8083/api/v1/pecas-insumos \
   -H "Authorization: Bearer $TOKEN_OFICINA" \
   -H "Content-Type: application/json" \
   -d '{
@@ -771,6 +770,47 @@ curl -s http://localhost:8080/api/v1/ordens-servico/00000000-0000-0000-0000-0000
 
 > ✅ `GET /{id}/status` reaproveita a mesma query `ObterOrdemServicoPorIdQuery` do
 > `GET /{id}`, então o comportamento de 404 para OS inexistente é idêntico.
+
+---
+
+## A21 — Pagamento Recusado (`OTHE`) e Compensação da Saga ⭐
+
+> 🔑 **Token:** `$TOKEN_OFICINA` na abertura da OS e `$TOKEN_CLIENTE` para aprovar e pagar.
+
+Valida a compensação por pagamento recusado: `PagamentoRecusado` → a OS rejeita o orçamento aprovado →
+`OrcamentoRejeitado` → o PecasInsumos estorna as peças. Fluxo completo em
+[`saga.md`](../arquitetura/diagramas/saga.md).
+
+```bash
+# 1) abrir a OS completa e anotar o estoque depois da baixa (assíncrona)
+OS_REC_ID=$(curl -s -X POST http://localhost:8080/api/v1/ordens-servico/completa \
+  -H "Authorization: Bearer $TOKEN_OFICINA" -H "Content-Type: application/json" \
+  -d '{"clienteId": "{CLIENTE_ID}", "veiculoId": "{VEICULO_ID}",
+       "servicos": [{ "servicoId": "{SERVICO_ID}", "quantidade": 1 }],
+       "pecas": [{ "pecaInsumoId": "{PECA_ID}", "quantidade": 2 }]}' | jq -r '.id')
+sleep 5
+curl -s http://localhost:8083/api/v1/pecas-insumos/{PECA_ID} -H "Authorization: Bearer $TOKEN_OFICINA" | jq '.quantidadeEstoque'
+
+# 2) aprovar o orçamento (cria o pagamento Pendente) e pagar com um titular recusado
+curl -s -X PATCH http://localhost:8080/api/v1/ordens-servico/$OS_REC_ID/aprovar-orcamento \
+  -H "Authorization: Bearer $TOKEN_CLIENTE" > /dev/null
+sleep 3
+curl -s -X POST http://localhost:8084/api/v1/pagamentos/ordens-servico/$OS_REC_ID/pagar \
+  -H "Authorization: Bearer $TOKEN_CLIENTE" -H "Content-Type: application/json" \
+  -d '{"titularCartao": "OTHE"}' | jq '{status, motivoRecusa}'
+
+# 3) conferir a compensação (aguarde alguns segundos pelos eventos)
+sleep 5
+curl -s http://localhost:8080/api/v1/ordens-servico/$OS_REC_ID -H "Authorization: Bearer $TOKEN_OFICINA" \
+  | jq '{status, orcamentos: [.orcamentos[].status]}'
+curl -s http://localhost:8083/api/v1/pecas-insumos/{PECA_ID} -H "Authorization: Bearer $TOKEN_OFICINA" | jq '.quantidadeEstoque'
+```
+
+**Resultado esperado:**
+- o pagamento volta `200 OK` com `status: "Recusado"` e `motivoRecusa: "cc_rejected_other_reason"`;
+- a OS fica `AguardandoAprovacao` com o orçamento `Rejeitado` (e apta a novo `registrar-diagnostico`);
+- o estoque volta ao valor anterior à abertura (as 2 unidades foram estornadas);
+- pagar de novo a mesma OS responde `404` (não há mais pagamento `Pendente`).
 
 ---
 

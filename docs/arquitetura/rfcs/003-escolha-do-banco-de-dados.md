@@ -4,6 +4,9 @@
 - **Data:** 2026-09-10
 - **Depende de:** [RFC-002](README.md) para a escolha do serviço gerenciado concreto (ainda
   pendente) — ver seção 3.2.
+- **Atualização da Fase 4:** o PostgreSQL deixou de ser único — cada serviço tem a própria instância RDS
+  (`cadastro`, `pecas-insumos`, `ordens-servico`), mantendo os mesmos schemas, e o serviço de Pagamento
+  usa DynamoDB ([ADR-009](../adrs/009-decomposicao-em-microsservicos.md)).
 
 ---
 

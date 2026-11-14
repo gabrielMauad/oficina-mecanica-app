@@ -1,8 +1,17 @@
 # Guia de Testes E2E — Cenário Feliz (Happy Path)
 
-> **Pré-requisito:** `docker compose up --build` rodando.
-> Base URL: `http://localhost:8080` (porta configurada no docker-compose).
-> Scalar/Swagger disponível em `http://localhost:8080/scalar`.
+> **Pré-requisito:** os cinco serviços e a infraestrutura compartilhada no ar.
+> Scalar disponível em `http://localhost:<porta>/scalar` de cada serviço.
+>
+> **Fase 4 — serviços separados.** Cada módulo roda como um serviço, em uma porta própria
+> (`docker compose up` de cada repositório, mais `docker-compose.infra.yml` — ver o
+> [README](../../README.md#execução-local)): **autenticacao** `8081` (login), **cadastro** `8082`
+> (clientes, veículos, serviços), **pecas-insumos** `8083`, **ordens-servico** `8080` e **pagamento**
+> `8084`. As URLs deste guia já usam essas portas; na nuvem, todas passam a ser o endpoint do
+> API Gateway. A baixa e o estorno de estoque são **assíncronos** (eventos): depois de gerar ou
+> rejeitar um orçamento, aguarde alguns segundos antes de conferir o estoque. A rota
+> `PATCH /ordens-servico/{id}/executar` **não existe mais**: a OS entra em execução quando o
+> **pagamento é aprovado** (Passo 11 do cenário feliz).
 >
 > **Como usar este guia:**
 > Cada passo retorna um ID nos campos indicados. Copie-o e substitua nos passos
@@ -21,14 +30,14 @@ Existem dois tokens, e usar o errado devolve **403 Forbidden**:
 | Variável | Papel | Usada em |
 |---|---|---|---|
 | `$TOKEN_OFICINA` | `Oficina` | tudo, exceto o que está abaixo |
-| `$TOKEN_CLIENTE` | `Cliente` | aprovar/rejeitar orçamento e `/acompanhamento` |
+| `$TOKEN_CLIENTE` | `Cliente` | aprovar/rejeitar orçamento, pagar e `/acompanhamento` |
 
 ### Token da oficina (papel `Oficina`)
 
-Emitido pela própria aplicação — é a **única rota anônima** além dos health checks:
+Emitido pelo serviço **autenticacao** (porta `8081`) — é a **única rota anônima** além dos health checks:
 
 ```bash
-export TOKEN_OFICINA=$(curl -s -X POST http://localhost:8080/api/v1/auth/login \
+export TOKEN_OFICINA=$(curl -s -X POST http://localhost:8081/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email": "admin@oficina.com", "senha": "admin123"}' | jq -r .token)
 
@@ -37,14 +46,14 @@ echo "$TOKEN_OFICINA"
 
 ### Token do cliente (papel `Cliente`)
 
-> ⚠️ **Não existe endpoint nesta aplicação que emita o token de cliente.** Ele é emitido por
-> uma **Function Serverless** que autentica por CPF e que **ainda não foi construída** (virá em
-> repositório separado — ver [ADR-005](../arquitetura/adrs/005-quatro-repositorios-e-estrategia-de-branches.md)).
-> Até lá, o token só é obtido **manualmente** ou pelo helper usado nos testes de integração
+> ⚠️ **Nenhum dos cinco serviços emite o token de cliente.** Na nuvem ele vem da **Function
+> Serverless** que autentica por CPF (`POST <endpoint>/auth/cpf`, repositório
+> `oficina-mecanica-lambda-auth`). Em ambiente local a Function não roda, então o token é obtido
+> **manualmente** (abaixo) ou pelo helper dos testes de integração
 > (`OficinaMecanicaWebApplicationFactory.CreateClienteAuthenticatedClient`).
 
 Para gerar um manualmente, assine um JWT **HS256** com o mesmo `Jwt__Secret` da aplicação
-(definido no `docker-compose.yml`) e com estas claims:
+(`docker-dev-secret-key-replace-in-prod-000` nos `docker-compose.yml`) e com estas claims:
 
 | Claim | Valor |
 |---|---|
@@ -79,10 +88,11 @@ export TOKEN_CLIENTE="<cole aqui o JWT gerado>"
 [7] Iniciar Diagnóstico
 [8] Registrar Diagnóstico  ← dispara automaticamente:
                                - Geração e envio do orçamento (OS → AguardandoAprovacao)
-                               - Decremento de estoque (integration event)
+                               - Decremento de estoque (integration event, assíncrono)
 [9] Verificar estoque decrementado
 [10] Aprovar Orçamento
-[11] Executar OS
+[11] Pagar o orçamento (serviço Pagamento, titular APRO) ← dispara:
+                               - PagamentoAprovado → OS passa a EmExecucao (evento)
 [12] Finalizar OS           ← dispara automaticamente:
                                - Notificação ao cliente (notificado_em preenchido)
 [13] Concluir OS
@@ -103,7 +113,7 @@ export TOKEN_CLIENTE="<cole aqui o JWT gerado>"
 > 🔑 **Token:** `$TOKEN_OFICINA` (papel `Oficina`).
 
 ```bash
-curl -s -X POST http://localhost:8080/api/v1/clientes \
+curl -s -X POST http://localhost:8082/api/v1/clientes \
   -H "Authorization: Bearer $TOKEN_OFICINA" \
   -H "Content-Type: application/json" \
   -d '{
@@ -137,7 +147,7 @@ curl -s -X POST http://localhost:8080/api/v1/clientes \
 > 🔑 **Token:** `$TOKEN_OFICINA` (papel `Oficina`).
 
 ```bash
-curl -s -X POST http://localhost:8080/api/v1/veiculos \
+curl -s -X POST http://localhost:8082/api/v1/veiculos \
   -H "Authorization: Bearer $TOKEN_OFICINA" \
   -H "Content-Type: application/json" \
   -d '{
@@ -171,7 +181,7 @@ curl -s -X POST http://localhost:8080/api/v1/veiculos \
 > 🔑 **Token:** `$TOKEN_OFICINA` (papel `Oficina`).
 
 ```bash
-curl -s -X POST http://localhost:8080/api/v1/servicos \
+curl -s -X POST http://localhost:8082/api/v1/servicos \
   -H "Authorization: Bearer $TOKEN_OFICINA" \
   -H "Content-Type: application/json" \
   -d '{
@@ -202,7 +212,7 @@ curl -s -X POST http://localhost:8080/api/v1/servicos \
 > 🔑 **Token:** `$TOKEN_OFICINA` (papel `Oficina`).
 
 ```bash
-curl -s -X POST http://localhost:8080/api/v1/pecas-insumos \
+curl -s -X POST http://localhost:8083/api/v1/pecas-insumos \
   -H "Authorization: Bearer $TOKEN_OFICINA" \
   -H "Content-Type: application/json" \
   -d '{
@@ -239,7 +249,7 @@ curl -s -X POST http://localhost:8080/api/v1/pecas-insumos \
 Adicionamos 10 unidades ao estoque antes de usar na OS.
 
 ```bash
-curl -s -X PATCH http://localhost:8080/api/v1/pecas-insumos/{PECA_ID}/estoque/entrada \
+curl -s -X PATCH http://localhost:8083/api/v1/pecas-insumos/{PECA_ID}/estoque/entrada \
   -H "Authorization: Bearer $TOKEN_OFICINA" \
   -H "Content-Type: application/json" \
   -d '{
@@ -427,7 +437,7 @@ curl -s http://localhost:8080/api/v1/ordens-servico/{OS_ID} \
 > 🔑 **Token:** `$TOKEN_OFICINA` (papel `Oficina`).
 
 ```bash
-curl -s http://localhost:8080/api/v1/pecas-insumos/{PECA_ID} \
+curl -s http://localhost:8083/api/v1/pecas-insumos/{PECA_ID} \
   -H "Authorization: Bearer $TOKEN_OFICINA" | jq .
 ```
 
@@ -478,17 +488,32 @@ curl -s -X PATCH http://localhost:8080/api/v1/ordens-servico/{OS_ID}/aprovar-orc
 
 ---
 
-## Passo 11 — Executar OS
+## Passo 11 — Pagar o orçamento (OS passa a execução)
 
-> 🔑 **Token:** `$TOKEN_OFICINA` (papel `Oficina`).
+> 🔑 **Token:** `$TOKEN_CLIENTE` (papel `Cliente`, `sub` = `{CLIENTE_ID}`, o dono da OS).
+
+Ao aprovar o orçamento (Passo 10), o serviço **Pagamento** cria um pagamento `Pendente`. Confira e
+pague com o titular `APRO` (o mock do Mercado Pago aprova; qualquer outro titular, como `OTHE`,
+recusa — ver o cenário A21 do guia de cenários alternativos):
 
 ```bash
-curl -s -X PATCH http://localhost:8080/api/v1/ordens-servico/{OS_ID}/executar \
-  -H "Authorization: Bearer $TOKEN_OFICINA" \
-  | jq .
+# o pagamento é criado de forma assíncrona (evento OrcamentoAprovado): pode levar alguns segundos
+curl -s http://localhost:8084/api/v1/pagamentos/ordens-servico/{OS_ID} \
+  -H "Authorization: Bearer $TOKEN_CLIENTE" | jq .
+
+curl -s -X POST http://localhost:8084/api/v1/pagamentos/ordens-servico/{OS_ID}/pagar \
+  -H "Authorization: Bearer $TOKEN_CLIENTE" \
+  -H "Content-Type: application/json" \
+  -d '{"titularCartao": "APRO"}' | jq .
 ```
 
-**Resultado esperado:** `200 OK`
+**Resultado esperado:** `200 OK` com o pagamento `Aprovado` (`valor` = 241,80). A OS passa a
+`EmExecucao` quando o evento `PagamentoAprovado` chega — aguarde alguns segundos e consulte:
+
+```bash
+curl -s http://localhost:8080/api/v1/ordens-servico/{OS_ID} \
+  -H "Authorization: Bearer $TOKEN_OFICINA" | jq '{id, status}'
+```
 
 ```json
 {
@@ -497,7 +522,7 @@ curl -s -X PATCH http://localhost:8080/api/v1/ordens-servico/{OS_ID}/executar \
 }
 ```
 
-> ✅ OS transitou para `EmExecucao`. Mecânico está trabalhando.
+> ✅ OS em `EmExecucao`: o mecânico está trabalhando. Não há rota para executar manualmente.
 
 ---
 
@@ -751,7 +776,7 @@ curl -s -X POST http://localhost:8080/api/v1/ordens-servico/completa \
 > ✅ Diferente do fluxo manual, aqui a OS já nasce em `AguardandoAprovacao` com orçamento
 > `Enviado` e `descricaoDiagnostico: null` — não existe etapa de diagnóstico neste fluxo.
 > A partir daqui, a OS segue o mesmo ciclo de vida do fluxo principal:
-> `aprovar-orcamento → executar → finalizar → concluir` (Passos 10–13).
+> `aprovar-orcamento → pagar (evento PagamentoAprovado → EmExecucao) → finalizar → concluir` (Passos 10–13).
 
 > ⚙️ **Salve:** `OS_COMPLETA_ID = id`
 
@@ -772,7 +797,7 @@ curl -s -X POST http://localhost:8080/api/v1/ordens-servico/completa \
 | 8a | GET /ordens-servico/{id} | `Oficina` | status = AguardandoAprovacao, orçamento = Enviado |
 | 9 | GET /pecas-insumos/{id} | `Oficina` | estoque = 8 (decrementou 2) |
 | 10 | PATCH aprovar-orcamento | `Cliente` | 200, orçamento = Aprovado |
-| 11 | PATCH executar | `Oficina` | 200, status = EmExecucao |
+| 11 | POST /pagamentos/ordens-servico/{id}/pagar (`APRO`) | `Cliente` | 200, pagamento Aprovado; a OS vira EmExecucao pelo evento |
 | 12 | PATCH finalizar | `Oficina` | 200, status = Finalizada |
 | 12a | GET /ordens-servico/{id} | `Oficina` | notificadoEm preenchido |
 | 13 | PATCH concluir | `Oficina` | 200, status = Entregue, entregueEm preenchido |

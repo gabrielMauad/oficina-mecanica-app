@@ -4,6 +4,15 @@
 > de execução por etapa, erros e falhas nas integrações) e "alertas para falhas no processamento de
 > ordens de serviço". Ver `docs/planos/fase-3/00-analise-da-spec.md`, seções 1.4 e 3.2-B.
 
+> **Fase 4 — métricas por serviço.** Cada serviço publica as suas métricas sob o próprio `service.name`
+> (`oficina-mecanica-<serviço>`; ver [README](../../README.md#observabilidade-opentelemetry--new-relic)).
+> Os instrumentos de **OS** (`oficina.ordens_servico.*`) vêm só do `ordens-servico`; o contador
+> `oficina.integracoes.falhas` é emitido por quem **consome** eventos — `ordens-servico`,
+> `pecas-insumos` e `pagamento`. Cadastro e Autenticacao registram o meter, mas não consomem eventos e
+> por isso não emitem. O MassTransit não exporta métricas próprias neste projeto: o volume de eventos
+> publicados e consumidos aparece nos **spans** (`<Evento> send`, `<fila> receive`/`process`) — ver
+> [`docs/observabilidade/`](../observabilidade/).
+
 A instrumentação usa apenas a API nativa do .NET, `System.Diagnostics.Metrics` (`Meter`,
 `Counter<T>`, `Histogram<T>`) — **não depende do OpenTelemetry**. O OTel (ou o agente do
 vendor de observabilidade escolhido) é responsável só por *coletar e exportar* essas métricas;
@@ -15,7 +24,7 @@ abaixo para descobrir os instrumentos publicados pela aplicação.
 | Meter | Onde vive | Classe |
 |---|---|---|
 | `OficinaMecanica.OrdensServico` | `OrdensServico.Application` | `OrdensServico.Application.Metrics.OrdensServicoMetrics` |
-| `OficinaMecanica.Integracoes` | `SharedKernel.Application` | `SharedKernel.Application.Metrics.IntegracoesMetrics` |
+| `OficinaMecanica.Integracoes` | `SharedKernel.Application` (cópia em cada serviço) | `SharedKernel.Application.Metrics.IntegracoesMetrics` |
 
 Cada classe encapsula um único `Meter` singleton (registrado via `AddOrdensServicoModule` /
 `AddSharedKernelServices`, seguindo o mesmo padrão de registro dos demais serviços do módulo) e o
@@ -112,11 +121,18 @@ rejeição de orçamento tem viés conhecido nesse caminho específico", não co
   `handler` (nome do tipo do `IIntegrationEventHandler` que falhou)
 - **Alimenta:** "erros e falhas nas integrações" no dashboard, e serve de base para o alerta de
   "falha no processamento de ordens de serviço" (alertar quando a taxa desse contador subir).
-- **Emitido em:** `InMemoryIntegrationEventBus.Publish<T>`, que agora envolve a chamada a cada
-  handler em `try/catch`: se o handler lançar, o contador é incrementado e **a exceção é
-  relançada** — o bus não engole o erro nem muda a semântica transacional existente (o
-  `TransactionBehavior` continua vendo a falha e revertendo a `UnitOfWork` normalmente). Handlers
-  seguintes na mesma publicação não são executados, exatamente como antes desta mudança.
+- **Emitido em** (na OS; PecasInsumos e Pagamento seguem o mesmo padrão nos seus consumers):
+  - **Consumers MassTransit** (`PagamentoAprovadoConsumer`, `PagamentoRecusadoConsumer`,
+    `EstoqueBaixaFalhouConsumer`): se o handler da Application lançar exceção (falha técnica), o
+    contador é incrementado com o nome do evento e do handler e **a exceção é relançada**, para o retry
+    do MassTransit atuar (3 reentregas: 1 s, 5 s, 10 s). Como cada tentativa que falha passa pelo
+    consumer, **uma mensagem que esgota o retry pode contar até 4 vezes**.
+  - **Handlers de integration event**, em falhas lógicas que não lançam exceção (OS não encontrada;
+    orçamento do `PagamentoAprovado` inexistente ou não `Aprovado`; comando de compensação que
+    devolveu falha): log de erro + contador, sem relançar — a mensagem é considerada tratada.
+  - **`EnviarOrcamentoAoCliente`** (domain event handler do `OrcamentoGerado`): falha ao montar ou
+    enviar o e-mail do orçamento — contador com `evento=OrcamentoGerado`, `handler=EnviarOrcamentoAoCliente`;
+    a abertura da OS e a publicação de `OrcamentoGeradoIntegrationEvent` seguem normalmente.
 
 ## Convenções seguidas
 
@@ -137,6 +153,7 @@ Cada instrumento tem cobertura em testes unitários usando `MetricCollector<T>`
 - `tests/Modules/OrdensServico/OrdemServico.Application.Tests/Commands/RegistrarDiagnosticoHandlerTests.cs`
 - `tests/Modules/OrdensServico/OrdemServico.Application.Tests/Commands/FinalizarOrdemServicoHandlerTests.cs`
 - `tests/Modules/OrdensServico/OrdemServico.Application.Tests/Commands/ConcluirOrdemServicoHandlerTests.cs`
+- `tests/Modules/OrdensServico/OrdemServico.Infrastructure.Tests/Messaging/SagaConsumersTests.cs` (falha nos consumers da Saga)
 - `tests/SharedKernel/SharedKernel.Application.Tests/InMemoryIntegrationEventBusTests.cs`
 
 Os testes cobrem tanto o caminho de sucesso (valor e tags corretos) quanto o de falha (nenhuma
