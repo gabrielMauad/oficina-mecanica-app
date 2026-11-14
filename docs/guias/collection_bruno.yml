@@ -67,6 +67,7 @@ items:
       auth: inherit
     items:
       # Copie o campo token da resposta para token_oficina (variável do ambiente).
+      # Somente ambiente local: admin@oficina.com / admin123 vêm do docker-compose. Na nuvem a senha do admin é gerada pelo Terraform e fica no segredo da aplicação (Secrets Manager) — o README mostra como obtê-la na seção 'Deploy na nuvem e a limitação da AWS Academy' (Senha do admin da oficina).
       - info:
           name: 'Login'
           type: http
@@ -935,6 +936,7 @@ items:
       auth: inherit
     items:
       # Copie o campo token da resposta para token_oficina (variável do ambiente).
+      # Somente ambiente local: admin@oficina.com / admin123 vêm do docker-compose. Na nuvem a senha do admin é gerada pelo Terraform e fica no segredo da aplicação (Secrets Manager) — o README mostra como obtê-la na seção 'Deploy na nuvem e a limitação da AWS Academy' (Senha do admin da oficina).
       - info:
           name: '1. Login (oficina) -> token_oficina'
           type: http

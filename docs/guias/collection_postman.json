@@ -94,7 +94,7 @@
                 }
               }
             },
-            "description": "Copie o campo token da resposta para token_oficina (variável do ambiente)."
+            "description": "Copie o campo token da resposta para token_oficina (variável do ambiente). Somente ambiente local: admin@oficina.com / admin123 vêm do docker-compose. Na nuvem a senha do admin é gerada pelo Terraform e fica no segredo da aplicação (Secrets Manager) — o README mostra como obtê-la na seção 'Deploy na nuvem e a limitação da AWS Academy' (Senha do admin da oficina)."
           },
           "response": []
         },
@@ -1456,7 +1456,7 @@
                 }
               }
             },
-            "description": "Copie o campo token da resposta para token_oficina (variável do ambiente)."
+            "description": "Copie o campo token da resposta para token_oficina (variável do ambiente). Somente ambiente local: admin@oficina.com / admin123 vêm do docker-compose. Na nuvem a senha do admin é gerada pelo Terraform e fica no segredo da aplicação (Secrets Manager) — o README mostra como obtê-la na seção 'Deploy na nuvem e a limitação da AWS Academy' (Senha do admin da oficina)."
           },
           "response": []
         },

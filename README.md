@@ -436,7 +436,7 @@ expõe `/healthz`, `/healthz/live`, `/healthz/ready`, `/openapi/v1.json` e `/sca
 | pecas-insumos | `/api/v1/pecas-insumos` (inclui `GET /{id}/disponibilidade?quantidade=n` e `PATCH /{id}/estoque/entrada` e `/saida`) | `Oficina` |
 | ordens-servico | `/api/v1/ordens-servico/**` (tabela acima) | `Oficina` / `Cliente` |
 | pagamento | `GET /api/v1/pagamentos/ordens-servico/{ordemServicoId}` | `Cliente` (só o dono) ou `Oficina` |
-| pagamento | `POST /api/v1/pagamentos/ordens-servico/{ordemServicoId}/pagar` | `Cliente` (só o dono) |
+| pagamento | `POST /api/v1/pagamentos/ordens-servico/{ordemServicoId}/pagar` | `Cliente` (só o dono); **409** se uma chamada concorrente já resolveu o pagamento (consulte o status pela rota `GET` acima) |
 
 Rotas técnicas por serviço, com reescrita de caminho (usadas pelo smoke test e para abrir o OpenAPI de
 cada serviço): `<endpoint>/<serviço>/healthz/ready` e `<endpoint>/<serviço>/openapi/v1.json`.
@@ -542,8 +542,9 @@ pagar (`APRO` ou `OTHE`) → conferir a OS → finalizar → concluir. Para a co
 e confira a OS (`orcamentos: Rejeitado`), o estoque estornado e o pagamento `Recusado`.
 
 Os guias [`teste-cenario-feliz`](docs/guias/teste-cenario-feliz.md) e
-[`teste-cenarios-alternativos`](docs/guias/teste-cenarios-alternativos.md) descrevem os fluxos de OS
-das fases anteriores em uma única URL; ver o aviso no início de cada um.
+[`teste-cenarios-alternativos`](docs/guias/teste-cenarios-alternativos.md) descrevem, passo a passo, o
+fluxo da OS e as compensações da Saga com uma URL por serviço (uma porta por serviço no ambiente
+local; na nuvem, o endpoint do API Gateway).
 
 ## Testes, BDD e cobertura
 
@@ -552,7 +553,11 @@ das fases anteriores em uma única URL; ver o aviso no início de cada um.
 dotnet test OficinaMecanica.slnx
 
 # Só os projetos que não usam Docker: domínio, Application, adapters, infraestrutura e SharedKernel
-for p in tests/Modules/OrdensServico/OrdemServico.Domain.Tests \n         tests/Modules/OrdensServico/OrdemServico.Application.Tests \n         tests/Modules/OrdensServico/OrdemServico.Adapters.Tests \n         tests/Modules/OrdensServico/OrdemServico.Infrastructure.Tests \n         tests/SharedKernel/SharedKernel.Application.Tests; do dotnet test $p; done
+for p in tests/Modules/OrdensServico/OrdemServico.Domain.Tests \
+         tests/Modules/OrdensServico/OrdemServico.Application.Tests \
+         tests/Modules/OrdensServico/OrdemServico.Adapters.Tests \
+         tests/Modules/OrdensServico/OrdemServico.Infrastructure.Tests \
+         tests/SharedKernel/SharedKernel.Application.Tests; do dotnet test "$p"; done
 
 # Só integração (Docker)
 dotnet test tests/IntegrationTests

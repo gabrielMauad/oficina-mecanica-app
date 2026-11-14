@@ -4,8 +4,9 @@
 > publicando na infraestrutura de nuvem persistente (AWS Academy Learner Lab — ver
 > [`infraestrutura.md`](infraestrutura.md)): build → teste e qualidade → imagem (**Amazon ECR**) →
 > deploy no **EKS** → smoke test via **API Gateway**. A infraestrutura (cluster, rede, bancos,
-> filas de mensageria, API Gateway, ECR) **não é criada pelas pipelines dos serviços**: nasce dos
-> repositórios Terraform `oficina-mecanica-infra-k8s` e `oficina-mecanica-infra-db`.
+> API Gateway, ECR) **não é criada pelas pipelines dos serviços**: nasce dos
+> repositórios Terraform `oficina-mecanica-infra-k8s` e `oficina-mecanica-infra-db`. Os tópicos e as
+> filas da mensageria são criados pelo MassTransit quando cada serviço sobe.
 >
 > Workflows deste serviço: [`ci.yml`](../../../.github/workflows/ci.yml) (PRs) e
 > [`ci-cd.yml`](../../../.github/workflows/ci-cd.yml) (push na `main` e `workflow_dispatch`). Os

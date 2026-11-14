@@ -195,6 +195,13 @@ Itens fora do escopo desta fase, registrados como evolução futura:
 - **Corrida entre pagamento e falha de estoque.** Se `EstoqueBaixaFalhou` e um `/pagar` chegarem
   quase juntos, vale o que gravar primeiro; se o pagamento vencer, a OS recebe `PagamentoAprovado`
   de um orçamento que já rejeitou e o ignora (a regra de execução exige orçamento `Aprovado`).
+- **Chamadas concorrentes de `POST .../pagar` para o mesmo pagamento.** A gravação do resultado é
+  condicional ao pagamento ainda estar `Pendente`: só a primeira chamada a gravar vence e publica o
+  evento. A outra recebe **409 Conflict** (`Pagamento.ResolvidoPorOutraChamada`), sem publicar nada;
+  o cliente deve consultar o status do pagamento (`GET .../pagamentos/ordens-servico/{ordemServicoId}`),
+  que mostra o resultado que valeu. Limitação conhecida: a chamada perdedora já tinha sido processada
+  pelo mock do Mercado Pago antes de a gravação condicional falhar, então a cobrança simulada dessa
+  chamada existe no mock mesmo sem efeito no pagamento. Como não há estorno, ela não é desfeita.
 - **Pagamento sem timeout.** Um pagamento `Pendente` não expira; o orçamento fica `Aprovado` até
   o cliente pagar, ser recusado ou a falha de estoque chegar.
 - **Estorno do pagamento** não existe: o mock não tem essa operação e nenhuma compensação a exige
