@@ -17,8 +17,8 @@ public sealed partial class FakeServicosExternos : HttpMessageHandler
 {
     private sealed record Cliente(Guid Id, string Nome, string Email, bool Ativo);
     private sealed record Veiculo(Guid Id, string Placa, Guid ClienteId);
-    private sealed record Servico(Guid Id, string Nome, decimal Preco);
-    private sealed record Peca(Guid Id, string Nome, decimal Preco, int Estoque, string Unidade);
+    private sealed record Servico(Guid Id, string Nome, decimal Preco, bool Ativo);
+    private sealed record Peca(Guid Id, string Nome, decimal Preco, int Estoque, string Unidade, bool Ativa);
 
     /// <summary>Requisição recebida pelo fake, com o header Authorization que chegou.</summary>
     public sealed record RequisicaoRecebida(string Metodo, string CaminhoEQuery, AuthenticationHeaderValue? Authorization);
@@ -64,17 +64,17 @@ public sealed partial class FakeServicosExternos : HttpMessageHandler
         return id;
     }
 
-    public Guid AdicionarServico(string nome, decimal preco)
+    public Guid AdicionarServico(string nome, decimal preco, bool ativo = true)
     {
         var id = Guid.NewGuid();
-        _servicos[id] = new Servico(id, nome, preco);
+        _servicos[id] = new Servico(id, nome, preco, ativo);
         return id;
     }
 
-    public Guid AdicionarPeca(string nome, decimal preco, int estoque, string unidade)
+    public Guid AdicionarPeca(string nome, decimal preco, int estoque, string unidade, bool ativa = true)
     {
         var id = Guid.NewGuid();
-        _pecas[id] = new Peca(id, nome, preco, estoque, unidade);
+        _pecas[id] = new Peca(id, nome, preco, estoque, unidade, ativa);
         return id;
     }
 
@@ -112,7 +112,7 @@ public sealed partial class FakeServicosExternos : HttpMessageHandler
         if (ServicoPorId().Match(caminho) is { Success: true } mServico)
             return Responder(_servicos.GetValueOrDefault(IdDe(mServico)), s => new
             {
-                s.Id, s.Nome, Descricao = (string?)null, s.Preco, Ativo = true,
+                s.Id, s.Nome, Descricao = (string?)null, s.Preco, s.Ativo,
                 CadastradoEm = DateTime.UtcNow, AtualizadoEm = DateTime.UtcNow
             });
 
@@ -122,7 +122,7 @@ public sealed partial class FakeServicosExternos : HttpMessageHandler
                 System.Web.HttpUtility.ParseQueryString(uri.Query)["quantidade"] ?? "0");
             return Responder(_pecas.GetValueOrDefault(IdDe(mDisp)), p => new
             {
-                Disponivel = p.Estoque >= quantidade, PrecoUnitario = p.Preco
+                Disponivel = p.Ativa && p.Estoque >= quantidade, PrecoUnitario = p.Preco
             });
         }
 
@@ -130,7 +130,7 @@ public sealed partial class FakeServicosExternos : HttpMessageHandler
             return Responder(_pecas.GetValueOrDefault(IdDe(mPeca)), p => new
             {
                 p.Id, p.Nome, Descricao = (string?)null, PrecoUnitario = p.Preco,
-                QuantidadeEmEstoque = p.Estoque, UnidadeDeMedida = p.Unidade, Ativo = true,
+                QuantidadeEmEstoque = p.Estoque, UnidadeDeMedida = p.Unidade, Ativo = p.Ativa,
                 CadastradoEm = DateTime.UtcNow, AtualizadoEm = DateTime.UtcNow
             });
 

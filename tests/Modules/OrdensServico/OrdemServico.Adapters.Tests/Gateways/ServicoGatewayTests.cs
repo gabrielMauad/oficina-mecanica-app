@@ -53,4 +53,41 @@ public class ServicoGatewayTests
         Assert.Null(await gateway.ObterPreco(ServicoId, CancellationToken.None));
         Assert.Null(await gateway.ObterNome(ServicoId, CancellationToken.None));
     }
+
+    [Fact]
+    public async Task EstaAtivo_ServicoAtivo_RetornaTrue()
+    {
+        var gateway = new ServicoGateway(FakeHttpMessageHandler.Ok(Json).CriarClient());
+
+        Assert.True(await gateway.EstaAtivo(ServicoId, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task EstaAtivo_ServicoDesativado_RetornaFalse()
+    {
+        var gateway = new ServicoGateway(
+            FakeHttpMessageHandler.Ok(Json.Replace("\"ativo\":true", "\"ativo\":false")).CriarClient());
+
+        Assert.False(await gateway.EstaAtivo(ServicoId, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task EstaAtivo_ServicoInexistente_RetornaFalse()
+    {
+        var gateway = new ServicoGateway(FakeHttpMessageHandler.Status(HttpStatusCode.NotFound).CriarClient());
+
+        Assert.False(await gateway.EstaAtivo(ServicoId, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task EstaAtivoEObterPreco_MesmoServico_ConsultaOServicoUmaUnicaVez()
+    {
+        var handler = FakeHttpMessageHandler.Ok(Json);
+        var gateway = new ServicoGateway(handler.CriarClient());
+
+        await gateway.ObterPreco(ServicoId, CancellationToken.None);
+        await gateway.EstaAtivo(ServicoId, CancellationToken.None);
+
+        Assert.Single(handler.Requisicoes);
+    }
 }

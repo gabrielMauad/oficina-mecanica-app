@@ -32,7 +32,14 @@ internal sealed class OrdemServicoRepository : IOrdemServicoRepository
             .FirstOrDefaultAsync(o => o.Id == incoming.Id, ct);
         if (tracked is null) return;
 
-        _context.Entry(tracked).CurrentValues.SetValues(incoming);
+        // O token de concorrência é o da leitura feita pelo handler (incoming.Versao), não o da
+        // releitura acima: assim o UPDATE falha se outra operação gravou a OS no intervalo. A
+        // versão sobe a cada gravação, o que também força o UPDATE da OS quando só os filhos mudam.
+        var entry = _context.Entry(tracked);
+        entry.CurrentValues.SetValues(incoming);
+        entry.Property(o => o.Versao).OriginalValue = incoming.Versao;
+        entry.Property(o => o.Versao).CurrentValue = incoming.Versao + 1;
+
         Sync(_context, tracked.ItensServico, incoming.ItensServico, r => r.Id);
         Sync(_context, tracked.ItensPeca, incoming.ItensPeca, r => r.Id);
         Sync(_context, tracked.Orcamentos, incoming.Orcamentos, r => r.Id);

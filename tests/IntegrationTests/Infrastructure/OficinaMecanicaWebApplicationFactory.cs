@@ -6,6 +6,8 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http;
+using OrdensServico.Adapters.DataSources;
+using OrdensServico.Infrastructure.Messaging;
 using Microsoft.IdentityModel.Tokens;
 using OficinaMecanica.Contracts.IntegrationEvents;
 using System.IdentityModel.Tokens.Jwt;
@@ -39,6 +41,9 @@ public sealed class OficinaMecanicaWebApplicationFactory
     /// <summary>Fake de Cadastro e PecasInsumos, compartilhado pelos testes da coleção.</summary>
     public FakeServicosExternos ServicosExternos { get; } = new();
 
+    /// <summary>Dispara ações concorrentes entre a leitura e a gravação de uma OS (ver <see cref="SimuladorDeConcorrencia"/>).</summary>
+    public SimuladorDeConcorrencia Simulador { get; } = new();
+
     // IAsyncLifetime.InitializeAsync — xunit.v3 chama antes do primeiro teste da coleção
     public async ValueTask InitializeAsync()
     {
@@ -70,8 +75,22 @@ public sealed class OficinaMecanicaWebApplicationFactory
             services.ConfigureAll<HttpClientFactoryOptions>(options =>
                 options.HttpMessageHandlerBuilderActions.Add(b => b.PrimaryHandler = ServicosExternos));
 
-            // Mesmo transporte em memória da aplicação, agora com o harness para observar publicações.
-            services.AddMassTransitTestHarness();
+            // Mesmo transporte em memória e mesmo retry da aplicação, agora com o harness para observar publicações.
+            services.AddMassTransitTestHarness(x =>
+                x.UsingInMemory((context, cfg) =>
+                {
+                    cfg.UseMessageRetry(r => r.Intervals(MensageriaExtensions.IntervalosDeRetry));
+                    cfg.ConfigureEndpoints(context);
+                }));
+
+            // Repositório da OS decorado para reproduzir corridas de gravação de forma determinística.
+            services.AddSingleton(Simulador);
+            var repositorio = services.Single(d => d.ServiceType == typeof(IOrdemServicoRepository));
+            services.Remove(repositorio);
+            services.AddScoped<IOrdemServicoRepository>(sp =>
+                new OrdemServicoRepositoryComConcorrenciaSimulada(
+                    (IOrdemServicoRepository)ActivatorUtilities.CreateInstance(sp, repositorio.ImplementationType!),
+                    sp.GetRequiredService<SimuladorDeConcorrencia>()));
         });
     }
 

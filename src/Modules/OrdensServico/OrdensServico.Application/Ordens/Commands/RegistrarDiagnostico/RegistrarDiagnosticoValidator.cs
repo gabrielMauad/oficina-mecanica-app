@@ -1,4 +1,5 @@
 using FluentValidation;
+using OrdensServico.Domain.OrdemServico;
 
 namespace OrdensServico.Application.Ordens.Commands.RegistrarDiagnostico;
 
@@ -24,8 +25,8 @@ public sealed class RegistrarDiagnosticoValidator : AbstractValidator<RegistrarD
                 .WithMessage("O ID do serviço deve ser informado.");
 
             s.RuleFor(x => x.Quantidade)
-            .GreaterThan(0)
-            .WithMessage("A quantidade deve ser maior que zero.");
+            .InclusiveBetween(1, LimitesDoOrcamento.QuantidadeMaximaPorItem)
+            .WithMessage($"A quantidade deve estar entre 1 e {LimitesDoOrcamento.QuantidadeMaximaPorItem}.");
         });
 
         RuleFor(x => x.Pecas)
@@ -39,8 +40,8 @@ public sealed class RegistrarDiagnosticoValidator : AbstractValidator<RegistrarD
             .WithMessage("O ID da peça deve ser informado.");
 
             p.RuleFor(x => x.Quantidade)
-            .GreaterThan(0)
-            .WithMessage("A quantidade deve ser maior que zero.");
+            .InclusiveBetween(1, LimitesDoOrcamento.QuantidadeMaximaPorItem)
+            .WithMessage($"A quantidade deve estar entre 1 e {LimitesDoOrcamento.QuantidadeMaximaPorItem}.");
         });
     }
 }

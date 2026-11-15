@@ -22,6 +22,12 @@ public sealed class ServicoGateway : IServicoGateway
         return servico?.Nome;
     }
 
+    public async Task<bool> EstaAtivo(Guid servicoId, CancellationToken ct)
+    {
+        var servico = await ObterServico(servicoId, ct);
+        return servico is { Ativo: true };
+    }
+
     private async Task<ServicoResposta?> ObterServico(Guid servicoId, CancellationToken ct)
     {
         if (!_cache.TryGetValue(servicoId, out var servico))

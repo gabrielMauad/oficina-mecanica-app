@@ -74,6 +74,8 @@ public sealed class AbrirOrdemServicoCompletaHandler : IRequestHandler<AbrirOrde
             decimal? snapshotPreco = await _servicoGateway.ObterPreco(servico.ServicoId, ct);
             if (snapshotPreco == null)
                 return OrdemServicoErrors.ServicoNaoEncontrado;
+            if (!await _servicoGateway.EstaAtivo(servico.ServicoId, ct))
+                return OrdemServicoErrors.ServicoDesativado;
             itemServicoList.Add(new ItemServicoInput(servico.ServicoId, servico.Quantidade, snapshotPreco.Value));
         }
 

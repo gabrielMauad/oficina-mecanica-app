@@ -24,6 +24,7 @@ public class RegistrarDiagnosticoHandlerTests
     public RegistrarDiagnosticoHandlerTests()
     {
         _handler = new(_servicoMock.Object, _pecaMock.Object, _repoMock.Object, _metrics);
+        _servicoMock.Setup(x => x.EstaAtivo(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
     }
 
     private static OrdensServico.Domain.OrdemServico.OrdemServico CriarOsEmDiagnostico()
@@ -140,5 +141,28 @@ public class RegistrarDiagnosticoHandlerTests
 
         Assert.True(result.IsFailure);
         Assert.Equal("OrdemServico.PecaIndisponivel", result.Error.Code);
+    }
+
+    [Fact(DisplayName = "Erro: serviço desativado no Cadastro → ServicoDesativado")]
+    public async Task Handle_ServicoDesativado_RetornaErroServicoDesativado()
+    {
+        var os = CriarOsEmDiagnostico();
+        _repoMock.Setup(x => x.ObterPorId(It.IsAny<OrdemServicoId>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(os);
+        _servicoMock.Setup(x => x.ObterPreco(ServicoId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(100m);
+        _servicoMock.Setup(x => x.EstaAtivo(ServicoId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        _pecaMock.Setup(x => x.Verificar(PecaId, 1, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PecaDisponibilidade(true, 50m));
+
+        var command = new RegistrarDiagnosticoCommand(
+            os.Id.Value, "desc", [new ServicoItem(ServicoId, 1)], [new PecaItem(PecaId, 1)]);
+
+        var result = await _handler.Handle(command, CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("OrdemServico.ServicoDesativado", result.Error.Code);
+        _repoMock.Verify(x => x.Atualizar(It.IsAny<OrdensServico.Domain.OrdemServico.OrdemServico>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 }

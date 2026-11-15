@@ -26,6 +26,7 @@ public class AbrirOrdemServicoCompletaHandlerTests
     public AbrirOrdemServicoCompletaHandlerTests()
     {
         _handler = new(_clienteMock.Object, _veiculoMock.Object, _servicoMock.Object, _pecaMock.Object, _repoMock.Object, _metrics);
+        _servicoMock.Setup(x => x.EstaAtivo(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
     }
 
     private AbrirOrdemServicoCompletaCommand CriarCommandValido() => new(
@@ -137,6 +138,54 @@ public class AbrirOrdemServicoCompletaHandlerTests
 
         Assert.True(result.IsFailure);
         Assert.Equal("OrdemServico.PecaNaoEncontrada", result.Error.Code);
+        _repoMock.Verify(x => x.Adicionar(It.IsAny<OrdensServico.Domain.OrdemServico.OrdemServico>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact(DisplayName = "Erro: serviço desativado no Cadastro → ServicoDesativado, sem criar a OS")]
+    public async Task Handle_ServicoDesativado_RetornaErroServicoDesativado()
+    {
+        ConfigurarClienteEVeiculoValidos();
+        _servicoMock.Setup(x => x.ObterPreco(ServicoId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(100m);
+        _servicoMock.Setup(x => x.EstaAtivo(ServicoId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        var result = await _handler.Handle(CriarCommandValido(), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("OrdemServico.ServicoDesativado", result.Error.Code);
+        _repoMock.Verify(x => x.Adicionar(It.IsAny<OrdensServico.Domain.OrdemServico.OrdemServico>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact(DisplayName = "Erro: peça desativada (PecasInsumos responde indisponível) → PecaIndisponivel, sem criar a OS")]
+    public async Task Handle_PecaDesativada_RetornaErroPecaIndisponivel()
+    {
+        ConfigurarClienteEVeiculoValidos();
+        _servicoMock.Setup(x => x.ObterPreco(ServicoId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(100m);
+        _pecaMock.Setup(x => x.Verificar(PecaId, 2, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PecaDisponibilidade(false, 50m));
+
+        var result = await _handler.Handle(CriarCommandValido(), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("OrdemServico.PecaIndisponivel", result.Error.Code);
+        _repoMock.Verify(x => x.Adicionar(It.IsAny<OrdensServico.Domain.OrdemServico.OrdemServico>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact(DisplayName = "Total do orçamento acima do limite da coluna → ValorTotalExcedido, sem criar a OS")]
+    public async Task Handle_TotalAcimaDoLimite_RetornaErroValorTotalExcedido()
+    {
+        ConfigurarClienteEVeiculoValidos();
+        _servicoMock.Setup(x => x.ObterPreco(ServicoId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(99_999_999m);
+        _pecaMock.Setup(x => x.Verificar(PecaId, 2, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PecaDisponibilidade(true, 99_999_999m));
+
+        var result = await _handler.Handle(CriarCommandValido(), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Orcamento.ValorTotalExcedido", result.Error.Code);
         _repoMock.Verify(x => x.Adicionar(It.IsAny<OrdensServico.Domain.OrdemServico.OrdemServico>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 }

@@ -23,8 +23,8 @@ public sealed class ItemServico : Entity<ItemServicoId>
     {
         if (servicoId == Guid.Empty)
             return Error.Validation("ItemServico.ServicoIdVazio", "ServicoId é obrigatório.");
-        if (quantidade <= 0)
-            return Error.Validation("ItemServico.QuantidadeInvalida", "Quantidade deve ser maior que zero.");
+        if (quantidade is <= 0 or > LimitesDoOrcamento.QuantidadeMaximaPorItem)
+            return LimitesDoOrcamento.QuantidadeInvalida("ItemServico.QuantidadeInvalida");
         if (precoUnitarioSnapshot < 0)
             return Error.Validation("ItemServico.PrecoUnitarioSnapshotInvalido", "Preço unitário snapshot não pode ser negativo.");
 
@@ -34,8 +34,8 @@ public sealed class ItemServico : Entity<ItemServicoId>
 
     internal Result<ItemServico> AtualizarQuantidade(int novaQuantidade)
     {
-        if (novaQuantidade <= 0)
-            return Error.Validation("ItemServico.QuantidadeInvalida", "Quantidade deve ser maior que zero.");
+        if (novaQuantidade is <= 0 or > LimitesDoOrcamento.QuantidadeMaximaPorItem)
+            return LimitesDoOrcamento.QuantidadeInvalida("ItemServico.QuantidadeInvalida");
 
         Quantidade = novaQuantidade;
         return this;

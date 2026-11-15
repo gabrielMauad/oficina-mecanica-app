@@ -1,4 +1,5 @@
 using FluentValidation;
+using OrdensServico.Domain.OrdemServico;
 
 namespace OrdensServico.Application.Ordens.Commands.AbrirOrdemServicoCompleta;
 
@@ -25,8 +26,8 @@ public sealed class AbrirOrdemServicoCompletaValidator : AbstractValidator<Abrir
                 .WithMessage("O ID do serviço deve ser informado.");
 
             s.RuleFor(x => x.Quantidade)
-                .GreaterThan(0)
-                .WithMessage("A quantidade deve ser maior que zero.");
+                .InclusiveBetween(1, LimitesDoOrcamento.QuantidadeMaximaPorItem)
+                .WithMessage($"A quantidade deve estar entre 1 e {LimitesDoOrcamento.QuantidadeMaximaPorItem}.");
         });
 
         RuleFor(x => x.Pecas)
@@ -40,8 +41,8 @@ public sealed class AbrirOrdemServicoCompletaValidator : AbstractValidator<Abrir
                 .WithMessage("O ID da peça deve ser informado.");
 
             p.RuleFor(x => x.Quantidade)
-                .GreaterThan(0)
-                .WithMessage("A quantidade deve ser maior que zero.");
+                .InclusiveBetween(1, LimitesDoOrcamento.QuantidadeMaximaPorItem)
+                .WithMessage($"A quantidade deve estar entre 1 e {LimitesDoOrcamento.QuantidadeMaximaPorItem}.");
         });
     }
 }
