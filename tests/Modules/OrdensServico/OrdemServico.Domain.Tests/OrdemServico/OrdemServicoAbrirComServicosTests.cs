@@ -102,4 +102,84 @@ public class OrdemServicoAbrirComServicosTests
         var evt = Assert.IsType<OrcamentoGerado>(os.DomainEvents.Single());
         Assert.Equal("Descrição do diagnóstico", evt.DescricaoDiagnostico);
     }
+
+    [Theory(DisplayName = "AbrirComServicos: quantidade de serviço fora de 1..999 → erro QuantidadeInvalida")]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(LimitesDoOrcamento.QuantidadeMaximaPorItem + 1)]
+    [InlineData(int.MaxValue)]
+    public void AbrirComServicos_QuantidadeDeServicoForaDaFaixa_RetornaErro(int quantidade)
+    {
+        var servicos = new[] { new ItemServicoInput(ServicoId, quantidade, 100m) };
+        var pecas = new[] { new ItemPecaInput(PecaId, 1, 50m) };
+
+        var result = Domain.OrdemServico.OrdemServico.AbrirComServicos(ClienteId, VeiculoId, servicos, pecas);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("ItemServico.QuantidadeInvalida", result.Error.Code);
+    }
+
+    [Theory(DisplayName = "AbrirComServicos: quantidade de peça fora de 1..999 → erro QuantidadeInvalida")]
+    [InlineData(0)]
+    [InlineData(LimitesDoOrcamento.QuantidadeMaximaPorItem + 1)]
+    [InlineData(int.MaxValue)]
+    public void AbrirComServicos_QuantidadeDePecaForaDaFaixa_RetornaErro(int quantidade)
+    {
+        var servicos = new[] { new ItemServicoInput(ServicoId, 1, 100m) };
+        var pecas = new[] { new ItemPecaInput(PecaId, quantidade, 50m) };
+
+        var result = Domain.OrdemServico.OrdemServico.AbrirComServicos(ClienteId, VeiculoId, servicos, pecas);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("ItemPeca.QuantidadeInvalida", result.Error.Code);
+    }
+
+    [Fact(DisplayName = "AbrirComServicos: quantidade máxima (999) com total dentro do limite é aceita")]
+    public void AbrirComServicos_QuantidadeNoLimiteSuperior_Aceita()
+    {
+        var servicos = new[] { new ItemServicoInput(ServicoId, LimitesDoOrcamento.QuantidadeMaximaPorItem, 100m) };
+        var pecas = new[] { new ItemPecaInput(PecaId, LimitesDoOrcamento.QuantidadeMaximaPorItem, 50m) };
+
+        var result = Domain.OrdemServico.OrdemServico.AbrirComServicos(ClienteId, VeiculoId, servicos, pecas);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(999 * 150m, result.Value.Orcamentos[0].ValorTotal);
+    }
+
+    [Fact(DisplayName = "AbrirComServicos: total acima do que a coluna comporta → erro ValorTotalExcedido")]
+    public void AbrirComServicos_TotalAcimaDoLimite_RetornaErroValorTotalExcedido()
+    {
+        var servicos = new[] { new ItemServicoInput(ServicoId, 999, 99_999_999m) };
+        var pecas = new[] { new ItemPecaInput(PecaId, 1, 50m) };
+
+        var result = Domain.OrdemServico.OrdemServico.AbrirComServicos(ClienteId, VeiculoId, servicos, pecas);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Orcamento.ValorTotalExcedido", result.Error.Code);
+    }
+
+    [Fact(DisplayName = "AbrirComServicos: soma que estoura o decimal → erro ValorTotalExcedido, sem exceção")]
+    public void AbrirComServicos_SomaQueEstouraODecimal_RetornaErroValorTotalExcedido()
+    {
+        var servicos = new[] { new ItemServicoInput(ServicoId, 999, decimal.MaxValue / 2) };
+        var pecas = new[] { new ItemPecaInput(PecaId, 1, 50m) };
+
+        var result = Domain.OrdemServico.OrdemServico.AbrirComServicos(ClienteId, VeiculoId, servicos, pecas);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Orcamento.ValorTotalExcedido", result.Error.Code);
+    }
+
+    [Fact(DisplayName = "Reconstituir: preserva a versão lida e uma OS nova começa na versão 0")]
+    public void Reconstituir_PreservaVersao_EOsNovaComecaEmZero()
+    {
+        var nova = Domain.OrdemServico.OrdemServico.Criar(ClienteId, VeiculoId).Value;
+        Assert.Equal(0, nova.Versao);
+
+        var reconstituida = Domain.OrdemServico.OrdemServico.Reconstituir(
+            OrdemServicoId.Novo(), ClienteId, VeiculoId, StatusOrdemServico.Recebida,
+            null, null, null, DateTime.UtcNow, DateTime.UtcNow, DateTime.UtcNow, [], [], [], versao: 7);
+
+        Assert.Equal(7, reconstituida.Versao);
+    }
 }

@@ -19,6 +19,12 @@ public sealed class OrdemServico : AggregateRoot<OrdemServicoId>
     public DateTime AtualizadoEm { get; private set; }
     public DateTime StatusAlteradoEm { get; private set; }
 
+    /// <summary>
+    /// Versão do agregado lida do armazenamento (0 para uma OS nova). Só serve de token de
+    /// concorrência otimista: a gravação falha se outra operação alterou a OS depois da leitura.
+    /// </summary>
+    public int Versao { get; private set; }
+
     public IReadOnlyList<ItemPeca> ItensPeca => _itensPeca.AsReadOnly();
     public IReadOnlyList<ItemServico> ItensServico => _itensServico.AsReadOnly();
     public IReadOnlyList<Orcamento> Orcamentos => _orcamentos.AsReadOnly();
@@ -50,7 +56,8 @@ public sealed class OrdemServico : AggregateRoot<OrdemServicoId>
         DateTime statusAlteradoEm,
         IEnumerable<ItemServico> itensServico,
         IEnumerable<ItemPeca> itensPeca,
-        IEnumerable<Orcamento> orcamentos
+        IEnumerable<Orcamento> orcamentos,
+        int versao
     ) : base(id)
     {
         ClienteId = clienteId;
@@ -62,6 +69,7 @@ public sealed class OrdemServico : AggregateRoot<OrdemServicoId>
         CriadoEm = criadoEm;
         AtualizadoEm = atualizadoEm;
         StatusAlteradoEm = statusAlteradoEm;
+        Versao = versao;
         _itensServico.AddRange(itensServico);
         _itensPeca.AddRange(itensPeca);
         _orcamentos.AddRange(orcamentos);
@@ -80,9 +88,10 @@ public sealed class OrdemServico : AggregateRoot<OrdemServicoId>
         DateTime statusAlteradoEm,
         IEnumerable<ItemServico> itensServico,
         IEnumerable<ItemPeca> itensPeca,
-        IEnumerable<Orcamento> orcamentos) =>
+        IEnumerable<Orcamento> orcamentos,
+        int versao = 0) =>
         new(id, clienteId, veiculoId, status, descricaoDiagnostico, notificadoEm, entregueEm,
-            criadoEm, atualizadoEm, statusAlteradoEm, itensServico, itensPeca, orcamentos);
+            criadoEm, atualizadoEm, statusAlteradoEm, itensServico, itensPeca, orcamentos, versao);
 
     public static Result<OrdemServico> Criar(Guid clienteId, Guid veiculoId)
     {
@@ -175,8 +184,19 @@ public sealed class OrdemServico : AggregateRoot<OrdemServicoId>
             _itensPeca.Add(itemResult.Value);
         }
 
-        var valorTotal = _itensPeca.Sum(x => x.Quantidade * x.PrecoUnitarioSnapshot)
+        decimal valorTotal;
+        try
+        {
+            valorTotal = _itensPeca.Sum(x => x.Quantidade * x.PrecoUnitarioSnapshot)
                        + _itensServico.Sum(x => x.Quantidade * x.PrecoUnitarioSnapshot);
+        }
+        catch (OverflowException)
+        {
+            return LimitesDoOrcamento.ValorTotalExcedido;
+        }
+
+        if (valorTotal > LimitesDoOrcamento.ValorTotalMaximo)
+            return LimitesDoOrcamento.ValorTotalExcedido;
 
         var orcamento = Orcamento.Criar(valorTotal);
         _orcamentos.Add(orcamento);

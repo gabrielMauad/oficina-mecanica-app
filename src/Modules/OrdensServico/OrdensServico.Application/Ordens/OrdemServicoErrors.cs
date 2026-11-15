@@ -24,6 +24,10 @@ internal class OrdemServicoErrors
         "OrdemServico.ServicoNaoEncontrado",
         "Servico não encontrado.");
 
+    public static readonly Error ServicoDesativado = Error.Validation(
+        "OrdemServico.ServicoDesativado",
+        "O serviço informado está desativado.");
+
     public static readonly Error PecaNaoEncontrada = Error.Validation(
         "OrdemServico.PecaNaoEncontrada",
         "Peça/insumo não encontrada.");

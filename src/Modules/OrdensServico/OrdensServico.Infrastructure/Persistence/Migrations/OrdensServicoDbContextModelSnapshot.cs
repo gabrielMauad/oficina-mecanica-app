@@ -168,6 +168,11 @@ namespace OrdensServico.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("veiculo_id");
 
+                    b.Property<int>("Versao")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("versao");
+
                     b.HasKey("Id");
 
                     b.ToTable("ordem_servico", "ordem_servico");

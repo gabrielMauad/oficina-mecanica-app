@@ -12,7 +12,8 @@ public static class MensageriaExtensions
 {
     public const string PrefixoEndpoints = "ordens-servico";
 
-    private static readonly TimeSpan[] IntervalosDeRetry =
+    /// <summary>Intervalos do retry de consumo: o consumer que falha (ex.: conflito de concorrência) é reexecutado com estado relido.</summary>
+    public static readonly TimeSpan[] IntervalosDeRetry =
     [
         TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)
     ];

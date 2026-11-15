@@ -153,3 +153,31 @@ A listagem atende à regra exigida na Fase 2 (`ListarOrdensParaAcompanhamentoRea
   (via `WHERE` nos status ativos), sem apagar nada do banco.
 
 > Event storming completo: [`event-storming.md`](event-storming.md).
+
+## Concorrência otimista na OS
+
+A OS (com orçamentos e itens) é um único agregado: é lida, alterada em memória e regravada por inteiro.
+Sem controle, duas operações que leem o mesmo estado (aprovar × `EstoqueBaixaFalhou`, aprovar ×
+rejeitar, rejeitar × rejeitar) sobrescrevem uma à outra, e a perdedora ainda publicaria o seu evento.
+
+- A tabela `ordem_servico` tem a coluna `versao` (inteiro), token de concorrência do EF Core. O
+  agregado carrega a `Versao` lida e o repositório grava com `WHERE versao = <lida>`, incrementando-a
+  a cada gravação (o UPDATE da raiz acontece mesmo quando só os orçamentos ou itens mudam). O orçamento
+  e os itens não têm token próprio: fazem parte do agregado e são protegidos pela versão da OS.
+- Como a publicação dos eventos de integração acontece **depois** do `SaveChanges`
+  (`TransactionBehavior`), a operação que perde a corrida lança `DbUpdateConcurrencyException` antes de
+  publicar qualquer evento.
+- **API:** a exceção vira **409 Conflict** (`CustomExceptionHandler`). O cliente pode repetir a chamada:
+  ela é reavaliada contra o novo estado (por exemplo, 422 se o orçamento já não está `Enviado`).
+- **Consumidores da Saga:** a exceção sobe até o MassTransit, cujo retry reexecuta o consumer com o
+  estado relido e reaplica a regra de negócio (ex.: `EstoqueBaixaFalhou` encontra o orçamento já
+  `Aprovado` e o rejeita).
+
+## Limites do orçamento
+
+A quantidade de cada item de serviço ou de peça deve estar entre 1 e 999 (`LimitesDoOrcamento`), e o
+valor total do orçamento não pode passar de 99.999.999,99 — o máximo da coluna `valor_total`
+(`numeric(10,2)`). Violações voltam como 422 (validação na entrada e invariantes no domínio), nunca 500.
+Serviço desativado no Cadastro também é recusado com 422 na abertura da OS e no registro do diagnóstico;
+peça desativada é recusada porque o PecasInsumos a informa como indisponível na consulta de
+disponibilidade.

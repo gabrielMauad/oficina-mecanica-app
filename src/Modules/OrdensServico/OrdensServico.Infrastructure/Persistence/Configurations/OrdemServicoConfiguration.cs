@@ -48,6 +48,13 @@ internal sealed class OrdemServicoConfiguration : IEntityTypeConfiguration<Ordem
             .HasColumnName("status_alterado_em")
             .IsRequired();
 
+        // Concorrência otimista: o UPDATE só vale se a versão ainda for a lida. O repositório
+        // incrementa a versão a cada gravação, mesmo quando só as entidades filhas mudam.
+        builder.Property(s => s.Versao)
+            .HasColumnName("versao")
+            .IsConcurrencyToken()
+            .IsRequired();
+
         builder.HasMany(os => os.ItensServico)
             .WithOne()
             .HasForeignKey("ordem_servico_id")

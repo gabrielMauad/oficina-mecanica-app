@@ -8,7 +8,7 @@ internal sealed record ClienteResposta(Guid Id, string Nome, string Email, bool 
 
 internal sealed record VeiculoResposta(Guid Id, string Placa, Guid ClienteId);
 
-internal sealed record ServicoResposta(Guid Id, string Nome, decimal Preco);
+internal sealed record ServicoResposta(Guid Id, string Nome, decimal Preco, bool Ativo);
 
 internal sealed record PecaInsumoResposta(Guid Id, string Nome, string UnidadeDeMedida);
 
