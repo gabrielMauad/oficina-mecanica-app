@@ -55,7 +55,7 @@ Planos de implementação e specs de refatoração (histórico de execução do 
 | [`dashboard-oficina-mecanica.json`](observabilidade/dashboard-oficina-mecanica.json) | Dashboard do New Relic importável: visão por serviço, métricas de OS e visão da Saga |
 | [`alertas.md`](observabilidade/alertas.md) | Condições de alerta em NRQL, por serviço |
 | [`uptime.md`](observabilidade/uptime.md) | Monitores sintéticos, um por serviço |
-| [`validacao.md`](observabilidade/validacao.md) | Validação das consultas com dados reais e o que a Fase 4 ainda precisa conferir |
+| [`validacao.md`](observabilidade/validacao.md) | Validação das consultas com dados reais (Fase 3) e conferência da visão por serviço e da Saga na nuvem (Fase 4) |
 
 ## 📎 Referência
 
