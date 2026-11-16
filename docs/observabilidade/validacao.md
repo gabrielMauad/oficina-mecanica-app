@@ -217,6 +217,7 @@ abaixo foram executadas no New Relic e os resultados, conferidos manualmente:
 | Consulta 1 (`service.name` em `Span`) | os cinco nomes | os cinco `service.name` apareceram |
 | Consulta 2 (spans de mensageria) | spans `... send` e `... process` | retornou os spans `... send` / `... process` esperados |
 | Consulta 3 (`keyset()` de `oficina.integracoes.falhas`) | dimensões `evento`, `handler` e `service.name` | retornou o keyset esperado |
+| Consulta 4 (página "Visão por serviço") | requisições, latência, 5xx e réplicas por serviço | a página faz parte do dashboard importado; não teve resultado registrado separadamente nesta conferência |
 | Trace distribuído `f45014e8c5bde165d16a1ac36909c087` (pagamento recusado) | um único trace atravessando os três serviços da compensação | 21 spans, 6 entidades, 0 erros, 287,63 ms (detalhe abaixo) |
 | Logs por `trace.id` | logs dos serviços do fluxo, correlacionados ao trace | 23 logs dos três serviços (detalhe abaixo) |
 | Dashboard `dashboard-oficina-mecanica.json` | importa na conta | importado, com o `accountId` real |
