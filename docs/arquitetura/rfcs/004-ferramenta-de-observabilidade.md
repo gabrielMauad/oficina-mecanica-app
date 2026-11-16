@@ -4,6 +4,10 @@
 - **Data:** 2026-09-10
 - **Decisões relacionadas:** [ADR-004 — Correlação via traceId W3C](../adrs/004-correlacao-via-traceid-w3c.md)
 - **Relacionado:** [RFC-002 — Escolha do provedor de nuvem](002-escolha-do-provedor-de-nuvem.md)
+- **Atualização da Fase 4:** o node group passou de `t3.small` para `t3.medium` (3 nós, 2 a 4), então as
+  menções a `t3.small` e a "dois nós" na nota de execução abaixo descrevem a Fase 3. A conta de capacidade
+  vigente, com o `nri-bundle`, está em `k8s/observabilidade/newrelic-values.yaml` e no
+  [ADR-008](../adrs/008-escalonamento-horizontal-com-hpa.md).
 
 ---
 

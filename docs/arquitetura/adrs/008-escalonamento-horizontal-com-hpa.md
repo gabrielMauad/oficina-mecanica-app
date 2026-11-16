@@ -4,6 +4,11 @@
 - **Data:** 2026-09-15
 - **Contexto maior:** [RFC-002 — Escolha do provedor de nuvem](../rfcs/002-escolha-do-provedor-de-nuvem.md)
 
+> **Leitura deste texto.** O corpo abaixo registra a decisão como foi tomada na Fase 3 (um único
+> Deployment `oficina-api`, `t3.small`, `maxReplicas: 5`). Os valores vigentes — cinco serviços, HPA de
+> 1 a 3 réplicas, `t3.medium` — estão na [nota de atualização da Fase 4](#nota-de-atualização--fase-4-2026-11-15)
+> no fim do documento.
+
 ## Contexto
 
 A Fase 3 exige um "Cluster Kubernetes com escalabilidade (gerenciado, ex.: EKS) — não mais kind"
@@ -118,3 +123,26 @@ exatamente a métrica que o HPA deste projeto usa. Descartada.
 - **`minReplicas: 1` não dá alta disponibilidade por redundância em repouso.** Sem tráfego, a
   aplicação roda em uma única réplica — aceitável para o escopo de demonstração acadêmica deste
   projeto, não para um ambiente de produção real.
+
+## Nota de atualização — Fase 4 (2026-11-15)
+
+A decisão (HPA nativo por CPU, nós fixos, sem Cluster Autoscaler/Karpenter) continua a mesma; mudaram
+os números, e o texto acima permanece como registro da Fase 3. Valores vigentes, conforme
+`variables.tf` de `oficina-mecanica-infra-k8s` e
+[`infraestrutura.md`](../diagramas/infraestrutura.md):
+
+- **Node group:** 3 nós `t3.medium` (2 vCPU e 4 GiB cada; `desired_size = 3`, `min_size = 2`,
+  `max_size = 4`) — o degrau que o último item das consequências negativas acima previa. O tipo
+  `t3.small` não é mais usado.
+- **HPA:** um por serviço (`ordens-servico`, `autenticacao`, `cadastro`, `pecas-insumos` e
+  `pagamento`), de 1 a 3 réplicas a 50% de CPU, com `requests` de 100m/256Mi e `limits` de
+  500m/512Mi por réplica.
+- **Capacidade de pods:** `t3.medium` suporta 17 pods por nó (limite de ENI/IP da instância), ou seja,
+  51 slots com 3 nós (34 no mínimo de 2 nós, 68 no máximo de 4). No pico do HPA, os cinco serviços
+  ocupam 15 pods; somam-se ~10 pods de sistema (`aws-node` e `kube-proxy` em cada nó, 2 `coredns` e
+  2 `metrics-server`) e 5 do `nri-bundle` (o `kubelet` do New Relic em cada nó, `ksm` e
+  `kube-state-metrics`), em torno de 30 dos 51 slots. A conta completa, com CPU e memória, está em
+  `k8s/observabilidade/newrelic-values.yaml`: no pico, cerca de 49% da CPU e 53% da memória
+  alocáveis dos 3 nós, e ainda cabe com o node group no mínimo de 2 nós.
+- **Memória:** 15 réplicas com `request` de 256Mi somam 3,75 GiB, distribuídos em 3 nós de 4 GiB (a
+  conta completa está no item anterior).

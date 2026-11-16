@@ -183,7 +183,7 @@ mantido pela própria New Relic (que mapeia cada tipo de widget para o id usado 
 ## Fase 4 — visão por serviço e Saga
 
 O dashboard e os alertas foram reescritos para o sistema distribuído. Esta seção separa o que está
-**confirmado** do que **ainda será conferido com dados da nuvem**.
+**confirmado** em código e execução local do que foi **conferido com tráfego real na nuvem**.
 
 ### Confirmado (código e execução local)
 
@@ -195,15 +195,16 @@ O dashboard e os alertas foram reescritos para o sistema distribuído. Esta seç
 | Nomes das filas: `ordens-servico-pagamento-aprovado`, `ordens-servico-pagamento-recusado`, `ordens-servico-estoque-baixa-falhou`, `pecas-insumos-orcamento-gerado`, `pecas-insumos-orcamento-rejeitado`, `pagamento-orcamento-aprovado`, `pagamento-estoque-baixa-falhou` | formatter `<serviço>-<evento>` e filas observadas no ambiente local |
 | `deploymentName` em `K8sContainerSample` (usado nos widgets por serviço) | `keyset()` da seção "Atributos confirmados" acima |
 
-### A conferir com tráfego real na nuvem
+### Conferido com tráfego real na nuvem
 
-Os widgets abaixo usam atributos e nomes confirmados no código e no Jaeger, mas ainda **não foram
-executados contra a conta do New Relic** com dados dos cinco serviços. Ao gerar tráfego na nuvem
-(abertura → aprovação → pagamento `APRO` e `OTHE`), confira:
+**2026-11-15**, ambiente AWS Academy (cluster EKS com os cinco serviços), contra a conta do New Relic.
+O caso exercitado foi o do pagamento **recusado** (titular `OTHE`), que percorre a compensação da Saga
+inteira (`PagamentoRecusado` → OS → `OrcamentoRejeitado` → estorno no PecasInsumos). As consultas
+abaixo foram executadas no New Relic e os resultados, conferidos manualmente:
 
-1. `SELECT uniques(service.name) FROM Span SINCE 1 hour ago` — aparecem os cinco nomes.
+1. `SELECT uniques(service.name) FROM Span SINCE 1 hour ago` — devem aparecer os cinco nomes.
 2. `SELECT uniques(name) FROM Span WHERE name LIKE '% send' OR name LIKE '% process' SINCE 1 hour ago`
-   — aparecem os spans de publicação e consumo dos seis eventos (se o nome dos spans de `send` vier
+   — devem aparecer os spans de publicação e consumo dos eventos (se o nome dos spans de `send` vier
    diferente, ajuste os `LIKE` dos widgets da página "Saga e mensageria" e da seção abaixo).
 3. `SELECT keyset() FROM Metric WHERE metricName = 'oficina.integracoes.falhas' SINCE 1 day ago` —
    confirma as dimensões `evento`, `handler` e `service.name`; o contador só existe depois da
@@ -211,7 +212,39 @@ executados contra a conta do New Relic** com dados dos cinco serviços. Ao gerar
 4. A página "Visão por serviço": requisições, latência e 5xx por `service.name`; réplicas por
    `deploymentName`.
 
-O resultado da conferência (esperado × medido) será registrado aqui, como na seção da Fase 3.
+| Item conferido | Esperado | Resultado |
+|---|---|---|
+| Consulta 1 (`service.name` em `Span`) | os cinco nomes | os cinco `service.name` apareceram |
+| Consulta 2 (spans de mensageria) | spans `... send` e `... process` | retornou os spans `... send` / `... process` esperados |
+| Consulta 3 (`keyset()` de `oficina.integracoes.falhas`) | dimensões `evento`, `handler` e `service.name` | retornou o keyset esperado |
+| Consulta 4 (página "Visão por serviço") | requisições, latência, 5xx e réplicas por serviço | a página faz parte do dashboard importado; não teve resultado registrado separadamente nesta conferência |
+| Trace distribuído `f45014e8c5bde165d16a1ac36909c087` (pagamento recusado) | um único trace atravessando os três serviços da compensação | 21 spans, 6 entidades, 0 erros, 287,63 ms (detalhe abaixo) |
+| Logs por `trace.id` | logs dos serviços do fluxo, correlacionados ao trace | 23 logs dos três serviços (detalhe abaixo) |
+| Dashboard `dashboard-oficina-mecanica.json` | importa na conta | importado, com o `accountId` real |
+| Monitores sintéticos | um por serviço, conforme [`uptime.md`](uptime.md) | criados os cinco `oficina-mecanica-healthz-<serviço>` |
+
+#### Trace do pagamento recusado
+
+Caminho do trace `f45014e8c5bde165d16a1ac36909c087` (21 spans, 6 entidades, 0 erros, 287,63 ms):
+
+1. `oficina-mecanica-pagamento` — `POST api/v1/pagamentos/ordens-servico/{ordemServicoId:guid}/pagar`,
+   com as chamadas ao mock do Mercado Pago (`POST /mock/mercadopago/oauth/token` e `/v1/payments`) e ao
+   DynamoDB;
+2. `oficina-mecanica-ordens-servico` — consumer `ordens-servico-pagamento-recusado` e o acesso ao
+   PostgreSQL;
+3. `oficina-mecanica-pecas-insumos` — consumer `pecas-insumos-orcamento-rejeitado`, com o estorno no
+   PostgreSQL.
+
+O New Relic mostra esse trace como **"Fragmented / Missing parent"**. É o esperado: o trace foi
+iniciado pelo script de teste com um header W3C `traceparent` cujo span pai não é reportado ao New
+Relic, então a raiz fica sem pai.
+
+#### Logs correlacionados
+
+A busca `trace.id:f45014e8c5bde165d16a1ac36909c087` nos logs retornou **23 logs** dos três serviços,
+do "Mock Mercado Pago ... rejected" até "Handled EstornarEstoqueDoOrcamentoCommand". No New Relic o
+atributo é `trace.id` (logs recebidos por OTLP); `trace_id` é o nome do campo no JSON que os pods
+escrevem no stdout.
 
 ### Como ler a visão da Saga
 
