@@ -37,7 +37,6 @@ os links para os demais repositórios estão aqui.
 - [Observabilidade](#observabilidade-opentelemetry--new-relic)
 - [CI/CD](#cicd)
 - [Deploy na nuvem e a limitação da AWS Academy](#deploy-na-nuvem-e-a-limitação-da-aws-academy)
-- [Vídeo demonstrativo](#vídeo-demonstrativo)
 
 **Histórico**
 - [Fases 1 a 3](#fases-1-a-3-resumo)
@@ -732,14 +731,6 @@ Manifestos em [`k8s/`](k8s/): `00-namespace.yaml` (compartilhado), `01-configmap
 
 > Desenho da infraestrutura: [`docs/arquitetura/diagramas/infraestrutura.md`](docs/arquitetura/diagramas/infraestrutura.md).
 
-## Vídeo demonstrativo
-
-> 🎥 **Fase 4:** <!-- video-fase-4 --> o link do vídeo será adicionado aqui. Roteiro: fluxo completo da
-> OS pelos serviços, Saga e tratamento de falhas (compensação por pagamento recusado), pipeline e
-> deploy de um serviço com validação dos testes, e monitoramento com rastreamento distribuído.
->
-> Fase 3 (arquitetura em nuvem): <https://youtu.be/ZnaUtgUUb5I>.
-
 ---
 
 # Histórico
@@ -754,7 +745,7 @@ Manifestos em [`k8s/`](k8s/): `00-namespace.yaml` (compartilhado), `01-configmap
   [`docs/planos/infra-fase-2/`](docs/planos/infra-fase-2/).
 - **Fase 3** — nuvem (AWS Academy): **EKS**, **RDS**, **API Gateway**, **Lambda** de autenticação por CPF,
   observabilidade com OpenTelemetry + New Relic, RFCs e ADRs 001–008. Análise em
-  [`docs/planos/fase-3/`](docs/planos/fase-3/00-analise-da-spec.md).
+  [`docs/planos/fase-3/`](docs/planos/fase-3/00-analise-da-spec.md); vídeo: <https://youtu.be/ZnaUtgUUb5I>.
 
 O sistema era um **Modular Monolith**: quatro Bounded Contexts com fronteiras físicas, um único
 PostgreSQL com um schema por módulo e um barramento de eventos em processo. Na Fase 4 cada módulo
